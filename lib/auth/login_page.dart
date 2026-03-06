@@ -25,7 +25,7 @@ class LoginPage extends StatelessWidget {
 
       if (email == dummyEmail && password == dummyPassword) {
         // Navigate to teacher dashboard
-        Navigator.pushReplacementNamed(context, '/teacher_page');
+        Navigator.pushReplacementNamed(context, '/teacher-dashboard');
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Invalid email or password!')),

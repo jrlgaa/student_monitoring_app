@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
+// Ensure these paths match your folder structure exactly
 import 'auth/login_page.dart';
 import 'auth/signup_page.dart';
 import 'dashboard/teacher_page.dart';
-// import 'dashboard/guardian_dashboard.dart'; // future use
+import 'dashboard/guardian_page.dart';
 
 void main() {
   runApp(const MyApp());
@@ -19,6 +20,7 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   bool isDarkMode = false;
 
+  // This function is passed down to all pages to change the global theme
   void toggleTheme() {
     setState(() {
       isDarkMode = !isDarkMode;
@@ -29,11 +31,13 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      title: 'LMS Portal',
 
       // ================= THEMES =================
       theme: ThemeData(
         brightness: Brightness.light,
         useMaterial3: true,
+        primarySwatch: Colors.blue,
       ),
 
       darkTheme: ThemeData(
@@ -59,10 +63,12 @@ class _MyAppState extends State<MyApp> {
         ),
 
         // Teacher Portal
-        '/teacher-dashboard': (context) => const TeacherPage(),
+        '/teacher-dashboard': (context) => TeacherPage(
+        ),
 
-        // Guardian Portal (future)
-        // '/guardian-dashboard': (context) => const GuardianDashboard(),
+        // Guardian Portal
+        '/guardian-dashboard': (context) => GuardianPage(
+        ),
       },
     );
   }

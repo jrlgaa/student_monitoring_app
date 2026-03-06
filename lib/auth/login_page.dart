@@ -11,9 +11,10 @@ class LoginPage extends StatelessWidget {
     final TextEditingController emailController = TextEditingController();
     final TextEditingController passwordController = TextEditingController();
 
-    // Dummy teacher account
-    const String dummyEmail = 'teacher@example.com';
-    const String dummyPassword = '123456';
+    // Dummy Accounts
+    const String teacherEmail = 'teacher@example.com';
+    const String guardianEmail = 'guardian@example.com';
+    const String commonPassword = '123456';
 
     void login(String email, String password) {
       if (email.isEmpty || password.isEmpty) {
@@ -23,9 +24,17 @@ class LoginPage extends StatelessWidget {
         return;
       }
 
-      if (email == dummyEmail && password == dummyPassword) {
-        // Navigate to teacher dashboard
-        Navigator.pushReplacementNamed(context, '/teacher-dashboard');
+      // Check credentials and role
+      if (password == commonPassword) {
+        if (email == teacherEmail) {
+          Navigator.pushReplacementNamed(context, '/teacher-dashboard');
+        } else if (email == guardianEmail) {
+          Navigator.pushReplacementNamed(context, '/guardian-dashboard');
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Invalid email or password!')),
+          );
+        }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Invalid email or password!')),
@@ -58,17 +67,23 @@ class LoginPage extends StatelessWidget {
                   height: 100,
                 ),
                 const SizedBox(height: 16),
+                const Text(
+                  'Guardian & Teacher Portal',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
                 Text(
                   'Log in to your account',
                   style: TextStyle(
                     color: isDarkMode ? Colors.grey[300] : Colors.grey[600],
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 24),
                 TextField(
                   controller: emailController,
                   decoration: InputDecoration(
-                    hintText: 'Phone or Email',
+                    hintText: 'Email Address',
+                    prefixIcon: const Icon(Icons.email_outlined),
                     filled: true,
                     fillColor: isDarkMode ? Colors.grey[700]?.withOpacity(0.2) : Colors.grey[100],
                     border: OutlineInputBorder(
@@ -83,6 +98,7 @@ class LoginPage extends StatelessWidget {
                   obscureText: true,
                   decoration: InputDecoration(
                     hintText: 'Password',
+                    prefixIcon: const Icon(Icons.lock_outline),
                     filled: true,
                     fillColor: isDarkMode ? Colors.grey[700]?.withOpacity(0.2) : Colors.grey[100],
                     border: OutlineInputBorder(
@@ -91,32 +107,22 @@ class LoginPage extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,
+                  height: 50,
                   child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
+                    ),
                     onPressed: () {
                       login(emailController.text.trim(), passwordController.text.trim());
                     },
-                    child: const Text('Sign in'),
+                    child: const Text('Sign in', style: TextStyle(fontSize: 16)),
                   ),
                 ),
-                const SizedBox(height: 10),
-                // Dummy login button
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.login),
-                    label: const Text('Login as Dummy Teacher'),
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                    onPressed: () {
-                      emailController.text = dummyEmail;
-                      passwordController.text = dummyPassword;
-                      login(dummyEmail, dummyPassword);
-                    },
-                  ),
-                ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 24),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -130,7 +136,7 @@ class LoginPage extends StatelessWidget {
                       },
                       child: const Text(
                         'Sign up',
-                        style: TextStyle(color: Colors.blue),
+                        style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
                       ),
                     ),
                   ],

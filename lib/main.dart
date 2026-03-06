@@ -5,6 +5,7 @@ import 'auth/login_page.dart';
 import 'auth/signup_page.dart';
 import 'dashboard/teacher_page.dart';
 import 'dashboard/guardian_page.dart';
+import 'dashboard/admin_page.dart';
 
 void main() {
   runApp(const MyApp());
@@ -68,6 +69,11 @@ class _MyAppState extends State<MyApp> {
 
         // Guardian Portal
         '/guardian-dashboard': (context) => GuardianPage(
+        ),
+        // Inside routes in main.dart
+        '/admin-dashboard': (context) => AdminPage(
+          toggleTheme: toggleTheme,
+          isDarkMode: isDarkMode,
         ),
       },
     );

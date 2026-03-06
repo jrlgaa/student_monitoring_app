@@ -36,6 +36,8 @@ class _GuardianPageState extends State<GuardianPage> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
+      // FIX 1: Prevent the keyboard from causing overflow if it opens
+      resizeToAvoidBottomInset: false,
       body: SafeArea(
         child: Row(
           children: [
@@ -47,7 +49,6 @@ class _GuardianPageState extends State<GuardianPage> {
               child: Column(
                 children: [
                   const SizedBox(height: 12),
-                  // Sidebar Toggle Header
                   SizedBox(
                     width: 80,
                     height: 50,
@@ -59,9 +60,11 @@ class _GuardianPageState extends State<GuardianPage> {
                     ),
                   ),
                   const SizedBox(height: 10),
+
                   // Navigation Items
                   Expanded(
                     child: ListView.builder(
+                      padding: EdgeInsets.zero, // FIX 2: Remove default padding
                       itemCount: menuTitles.length,
                       itemBuilder: (context, index) {
                         final selected = index == selectedIndex;
@@ -71,7 +74,7 @@ class _GuardianPageState extends State<GuardianPage> {
                             child: Icon(menuIcons[index],
                                 color: selected ? Colors.blue : null),
                           ),
-                          title: isSidebarOpen ? Text(menuTitles[index]) : null,
+                          title: isSidebarOpen ? Text(menuTitles[index], maxLines: 1) : null,
                           selected: selected,
                           selectedTileColor: Colors.blue.withOpacity(0.1),
                           onTap: () => setState(() => selectedIndex = index),
@@ -129,9 +132,15 @@ class _GuardianPageState extends State<GuardianPage> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-              if (selectedIndex == 0) // Example for "Welcome" on Activity page
-                const Text("Welcome, Guardian!", style: TextStyle(color: Colors.grey)),
+              Flexible( // FIX 3: Prevent title text from overflowing horizontally
+                child: Text(
+                  title,
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (selectedIndex == 0 && isSidebarOpen == false)
+                const Text("Welcome!", style: TextStyle(color: Colors.grey, fontSize: 12)),
             ],
           ),
         ),
@@ -140,7 +149,42 @@ class _GuardianPageState extends State<GuardianPage> {
     );
   }
 
-  // ================= 1. ACTIVITY SECTION =================
+  // ================= 5. PROFILE (The most likely culprit for overflow) =================
+  Widget _profileSection() {
+    // FIX 4: Wrap profile content in a scroll view so it doesn't push against the bottom
+    return _genericSection('My Profile', SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+      child: Column(
+        children: [
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: const ListTile(
+              contentPadding: EdgeInsets.all(16),
+              title: Text("Information"),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(height: 8),
+                  Text("Guardian Name: Maria Dela Cruz"),
+                  Text("Email: maria@email.com"),
+                ],
+              ),
+              trailing: Icon(Icons.edit),
+            ),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton.icon(
+            onPressed: () {},
+            icon: const Icon(Icons.add),
+            label: const Text("Add Student"),
+            style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
+          )
+        ],
+      ),
+    ));
+  }
+
+  // Rest of your sections remain the same...
   Widget _activitySection() {
     return _genericSection('Teacher Activities', ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -149,7 +193,6 @@ class _GuardianPageState extends State<GuardianPage> {
         margin: const EdgeInsets.only(bottom: 16),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: ListTile(
-          contentPadding: const EdgeInsets.all(16),
           title: Text("New Learning Material: Module ${index + 1}"),
           subtitle: const Text("Posted by Teacher Juan • 2 hours ago"),
           trailing: const Icon(Icons.chevron_right),
@@ -158,7 +201,6 @@ class _GuardianPageState extends State<GuardianPage> {
     ));
   }
 
-  // ================= 2. STUDENT GRADES SECTION =================
   Widget _studentGradesSection() {
     return _genericSection('Student Grade', SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -171,7 +213,6 @@ class _GuardianPageState extends State<GuardianPage> {
             children: [
               const Text("Juan Dela Cruz (Grade 5)", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 20),
-              // Quarter Tabs (Simple Row)
               Row(
                 children: ['Q1', 'Q2', 'Q3', 'Q4'].map((q) => Container(
                   margin: const EdgeInsets.only(right: 8),
@@ -179,7 +220,6 @@ class _GuardianPageState extends State<GuardianPage> {
                 )).toList(),
               ),
               const SizedBox(height: 20),
-              // Grade Grid
               GridView.count(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -218,7 +258,6 @@ class _GuardianPageState extends State<GuardianPage> {
     );
   }
 
-  // ================= 3. ANNOUNCEMENTS =================
   Widget _announcementsSection() {
     return _genericSection('Announcements', ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -243,7 +282,6 @@ class _GuardianPageState extends State<GuardianPage> {
     ));
   }
 
-  // ================= 4. ATTENDANCE =================
   Widget _attendanceSection() {
     return _genericSection('Attendance Records', Column(
       children: [
@@ -271,40 +309,5 @@ class _GuardianPageState extends State<GuardianPage> {
     );
   }
 
-  // ================= 5. PROFILE =================
-  Widget _profileSection() {
-    return _genericSection('My Profile', Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        children: [
-          Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: const ListTile(
-              contentPadding: EdgeInsets.all(16),
-              title: Text("Information"),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(height: 8),
-                  Text("Guardian Name: Maria Dela Cruz"),
-                  Text("Email: maria@email.com"),
-                ],
-              ),
-              trailing: Icon(Icons.edit),
-            ),
-          ),
-          const SizedBox(height: 20),
-          ElevatedButton.icon(
-            onPressed: () {},
-            icon: const Icon(Icons.add),
-            label: const Text("Add Student"),
-            style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
-          )
-        ],
-      ),
-    ));
-  }
-
-  // Placeholder for missing sections logic
   Widget _activityGradesSection() => _genericSection('Activity Grades', const Center(child: Text('Chart/Grades List')));
 }

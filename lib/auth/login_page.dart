@@ -12,6 +12,7 @@ class LoginPage extends StatelessWidget {
     final TextEditingController passwordController = TextEditingController();
 
     // Dummy Accounts
+    const String adminEmail = "admin123";
     const String teacherEmail = 'teacher@example.com';
     const String guardianEmail = 'guardian@example.com';
     const String commonPassword = '123456';
@@ -30,6 +31,8 @@ class LoginPage extends StatelessWidget {
           Navigator.pushReplacementNamed(context, '/teacher-dashboard');
         } else if (email == guardianEmail) {
           Navigator.pushReplacementNamed(context, '/guardian-dashboard');
+        } else if (email == adminEmail) {
+          Navigator.pushReplacementNamed(context, '/admin-dashboard');
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Invalid email or password!')),

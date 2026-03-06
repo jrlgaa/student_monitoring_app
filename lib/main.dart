@@ -38,12 +38,14 @@ class _MyAppState extends State<MyApp> {
       theme: ThemeData(
         brightness: Brightness.light,
         useMaterial3: true,
-        primarySwatch: Colors.blue,
+        // colorSchemeSeed is the modern way to set primary colors in M3
+        colorSchemeSeed: Colors.blue,
       ),
 
       darkTheme: ThemeData(
         brightness: Brightness.dark,
         useMaterial3: true,
+        colorSchemeSeed: Colors.blue,
       ),
 
       themeMode: isDarkMode ? ThemeMode.dark : ThemeMode.light,
@@ -63,14 +65,17 @@ class _MyAppState extends State<MyApp> {
           isDarkMode: isDarkMode,
         ),
 
-        // Teacher Portal
+        // Teacher Portal - Passed parameters
         '/teacher-dashboard': (context) => TeacherPage(
+          toggleTheme: toggleTheme,
+          isDarkMode: isDarkMode,
         ),
 
-        // Guardian Portal
+        // Guardian Portal - Passed parameters
         '/guardian-dashboard': (context) => GuardianPage(
         ),
-        // Inside routes in main.dart
+
+        // Admin Portal - Passed parameters
         '/admin-dashboard': (context) => AdminPage(
           toggleTheme: toggleTheme,
           isDarkMode: isDarkMode,

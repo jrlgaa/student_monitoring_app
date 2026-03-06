@@ -12,14 +12,89 @@ class SignUpPage extends StatefulWidget {
 
 class _SignUpPageState extends State<SignUpPage> {
   String role = 'Guardian';
-  final List<String> roles = ['Guardian', 'Teacher', 'Student'];
+  final List<String> roles = ['Guardian', 'Teacher'];
 
-  final TextEditingController nameController = TextEditingController();
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+
+  final TextEditingController firstNameController = TextEditingController();
+  final TextEditingController middleNameController = TextEditingController();
+  final TextEditingController lastNameController = TextEditingController();
   final TextEditingController emailController = TextEditingController();
   final TextEditingController verificationController = TextEditingController();
-  final TextEditingController lrnController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   final TextEditingController confirmPasswordController = TextEditingController();
+
+  @override
+  void dispose() {
+    firstNameController.dispose();
+    middleNameController.dispose();
+    lastNameController.dispose();
+    emailController.dispose();
+    verificationController.dispose();
+    passwordController.dispose();
+    confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  // Helper to build TextFields
+  Widget _buildTextField(TextEditingController controller, String hint, IconData icon) {
+    return TextField(
+      controller: controller,
+      decoration: InputDecoration(
+        hintText: hint,
+        prefixIcon: Icon(icon),
+        filled: true,
+        fillColor: widget.isDarkMode ? Colors.grey[700]?.withOpacity(0.2) : Colors.grey[100],
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+      ),
+    );
+  }
+
+  // THE UPDATED VALIDATION LOGIC
+  void _handleSignUp() {
+    String email = emailController.text.trim();
+
+    // 1. Check for empty required fields
+    if (firstNameController.text.isEmpty ||
+        lastNameController.text.isEmpty ||
+        email.isEmpty ||
+        verificationController.text.isEmpty ||
+        passwordController.text.isEmpty ||
+        confirmPasswordController.text.isEmpty) {
+      _showSnackBar('Please fill in all required fields');
+      return;
+    }
+
+    // 2. TEACHER EMAIL VALIDATION (@deped.gov.ph)
+    if (role == 'Teacher') {
+      if (!email.endsWith('@deped.gov.ph')) {
+        _showSnackBar('Teachers must use a @deped.gov.ph email address');
+        return;
+      }
+    }
+
+    // 3. Password Match Check
+    if (passwordController.text != confirmPasswordController.text) {
+      _showSnackBar('Passwords do not match');
+      return;
+    }
+
+    // Success
+    _showSnackBar('Account created successfully!', isError: false);
+  }
+
+  void _showSnackBar(String message, {bool isError = true}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.redAccent : Colors.green,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,7 +103,7 @@ class _SignUpPageState extends State<SignUpPage> {
         child: SingleChildScrollView(
           child: Container(
             padding: const EdgeInsets.all(24),
-            margin: const EdgeInsets.symmetric(horizontal: 16),
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 40),
             decoration: BoxDecoration(
               color: widget.isDarkMode ? Colors.grey[800] : Colors.white,
               borderRadius: BorderRadius.circular(24),
@@ -43,188 +118,100 @@ class _SignUpPageState extends State<SignUpPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  'Sign up to get started',
-                  style: TextStyle(
-                    color: widget.isDarkMode ? Colors.grey[300] : Colors.grey[600],
-                  ),
-                ),
+                const Text('Create an Account', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 24),
+                _buildTextField(firstNameController, 'First Name', Icons.person_outline),
                 const SizedBox(height: 16),
-                TextField(
-                  controller: nameController,
-                  decoration: InputDecoration(
-                    hintText: 'Full Name',
-                    filled: true,
-                    fillColor: widget.isDarkMode ? Colors.grey[700]?.withOpacity(0.2) : Colors.grey[100],
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
+                _buildTextField(middleNameController, 'Middle Name (Optional)', Icons.person_search_outlined),
                 const SizedBox(height: 16),
-                TextField(
-                  controller: emailController,
-                  decoration: InputDecoration(
-                    hintText: 'Phone number or email',
-                    filled: true,
-                    fillColor: widget.isDarkMode ? Colors.grey[700]?.withOpacity(0.2) : Colors.grey[100],
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
+                _buildTextField(lastNameController, 'Last Name', Icons.person_outline),
                 const SizedBox(height: 16),
+                _buildTextField(emailController, 'Enter email address', Icons.email_outlined),
+                const SizedBox(height: 16),
+
+                // Verification Row
                 Row(
                   children: [
-                    Expanded(
-                      flex: 2,
-                      child: TextField(
-                        controller: verificationController,
-                        decoration: InputDecoration(
-                          hintText: 'Verification Code',
-                          filled: true,
-                          fillColor: widget.isDarkMode ? Colors.grey[700]?.withOpacity(0.2) : Colors.grey[100],
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                        ),
-                      ),
-                    ),
+                    Expanded(flex: 2, child: _buildTextField(verificationController, 'Code', Icons.verified_user_outlined)),
                     const SizedBox(width: 8),
                     Expanded(
                       flex: 1,
                       child: ElevatedButton(
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Verification code sent!')),
-                          );
-                        },
-                        child: const Text('Get code'),
+                        onPressed: () => _showSnackBar('Code sent!', isError: false),
+                        child: const Text('Get code', style: TextStyle(fontSize: 10)),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 16),
 
-                // Role Dropdown
+                // Role Selector
                 DropdownButtonFormField<String>(
                   value: role,
                   items: roles.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
                   onChanged: (value) => setState(() => role = value!),
                   decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.assignment_ind_outlined),
                     filled: true,
                     fillColor: widget.isDarkMode ? Colors.grey[700]?.withOpacity(0.2) : Colors.grey[100],
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                   ),
                 ),
                 const SizedBox(height: 16),
 
-                if (role == 'Student')
-                  TextField(
-                    controller: lrnController,
-                    decoration: InputDecoration(
-                      hintText: 'Student LRN',
-                      filled: true,
-                      fillColor: widget.isDarkMode ? Colors.grey[700]?.withOpacity(0.2) : Colors.grey[100],
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                if (role == 'Student') const SizedBox(height: 16),
-
+                // Password with Show/Hide
                 TextField(
                   controller: passwordController,
-                  obscureText: true,
+                  obscureText: _obscurePassword,
                   decoration: InputDecoration(
                     hintText: 'Password',
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    ),
                     filled: true,
                     fillColor: widget.isDarkMode ? Colors.grey[700]?.withOpacity(0.2) : Colors.grey[100],
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                   ),
                 ),
                 const SizedBox(height: 16),
+
+                // Confirm Password with Show/Hide
                 TextField(
                   controller: confirmPasswordController,
-                  obscureText: true,
+                  obscureText: _obscureConfirmPassword,
                   decoration: InputDecoration(
                     hintText: 'Confirm Password',
+                    prefixIcon: const Icon(Icons.lock_reset_outlined),
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscureConfirmPassword ? Icons.visibility_off : Icons.visibility),
+                      onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+                    ),
                     filled: true,
                     fillColor: widget.isDarkMode ? Colors.grey[700]?.withOpacity(0.2) : Colors.grey[100],
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 24),
+
                 SizedBox(
                   width: double.infinity,
+                  height: 50,
                   child: ElevatedButton(
-                    onPressed: () {
-                      if (nameController.text.isEmpty ||
-                          emailController.text.isEmpty ||
-                          verificationController.text.isEmpty ||
-                          passwordController.text.isEmpty ||
-                          confirmPasswordController.text.isEmpty ||
-                          (role == 'Student' && lrnController.text.isEmpty)) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Please fill in all fields')),
-                        );
-                        return;
-                      }
-                      if (passwordController.text != confirmPasswordController.text) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Passwords do not match')),
-                        );
-                        return;
-                      }
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Account created!')),
-                      );
-                    },
+                    onPressed: _handleSignUp,
                     child: const Text('Create Account'),
                   ),
                 ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      "Already have an account? ",
-                      style: TextStyle(color: widget.isDarkMode ? Colors.grey[300] : Colors.grey[700]),
-                    ),
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.pushNamed(context, '/login');
-                      },
-                      child: const Text(
-                        'Log in',
-                        style: TextStyle(color: Colors.blue),
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 20),
+                GestureDetector(
+                  onTap: () => Navigator.pushNamed(context, '/login'),
+                  child: const Text('Already have an account? Log in', style: TextStyle(color: Colors.blue)),
                 ),
               ],
             ),
           ),
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: widget.isDarkMode ? Colors.grey[700] : Colors.grey[200],
-        foregroundColor: widget.isDarkMode ? Colors.white : Colors.black,
-        onPressed: widget.toggleTheme,
-        child: Text(widget.isDarkMode ? '☀️' : '🌙'),
       ),
     );
   }

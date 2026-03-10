@@ -81,8 +81,9 @@ class _LoginPageState extends State<LoginPage> {
                 const SizedBox(height: 16),
                 const Text(
                   'Student Monitoring Application',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold), textAlign: TextAlign.center,
                 ),
+
                 const SizedBox(height: 8),
                 Text(
                   'Log in to your account',

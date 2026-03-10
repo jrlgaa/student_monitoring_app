@@ -26,7 +26,6 @@ class _TeacherPageState extends State<TeacherPage> {
     'Activities',
     'Students',
     'Announcements',
-    'Messages',
     'Attendance',
     'Profile',
   ];
@@ -35,7 +34,6 @@ class _TeacherPageState extends State<TeacherPage> {
     Icons.folder,
     Icons.school,
     Icons.campaign,
-    Icons.message,
     Icons.calendar_month,
     Icons.person,
   ];
@@ -248,7 +246,6 @@ class _TeacherPageState extends State<TeacherPage> {
       case 0: return _activitiesSection();
       case 1: return _genericSection('Student Grades', const Center(child: Text('Grades List Here')));
       case 2: return _genericSection('Announcements', const Center(child: Text('Announcements List')));
-      case 3: return _genericSection('Messages', const Center(child: Text('No Messages')));
       case 4: return _genericSection('Attendance Records', const Center(child: Text('Attendance Data')));
       case 5: return _genericSection('Teacher Profile', _profileContent());
       default: return const SizedBox();

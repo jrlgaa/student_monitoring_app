@@ -63,33 +63,56 @@ class _TeacherPageState extends State<TeacherPage> {
           : null,
 
       body: SafeArea(
-        child: Row(
+        child: Stack(
           children: [
+            // ================= MAIN CONTENT =================
+            Container(
+              color: widget.isDarkMode ? Colors.grey[900] : Colors.white,
+              child: _buildSection(),
+            ),
 
-            // ================= SIDEBAR =================
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              width: isSidebarOpen ? 260 : 60, // Slightly wider to fit the profile card
-              decoration: BoxDecoration(
-                color: widget.isDarkMode ? Colors.grey[900] : Colors.white,
+            // ================= OVERLAY SIDEBAR =================
+            if (isSidebarOpen)
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: () => setState(() => isSidebarOpen = false),
+                  child: Container(color: Colors.black26),
+                ),
               ),
-              child: Column(
-                children: [
-                  const SizedBox(height: 12),
-                  // HAMBURGER MENU ICON
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: Center(
-                      child: IconButton(
-                        icon: const Icon(Icons.menu),
-                        onPressed: () => setState(() => isSidebarOpen = !isSidebarOpen),
+
+            // ================= SIDEBAR DRAWER =================
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 300),
+              left: isSidebarOpen ? 0 : -260,
+              top: 0,
+              bottom: 0,
+              width: 260,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: widget.isDarkMode ? Colors.grey[900] : Colors.white,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 10,
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 12),
+                    // HAMBURGER MENU ICON
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: Center(
+                        child: IconButton(
+                          icon: const Icon(Icons.menu),
+                          onPressed: () => setState(() => isSidebarOpen = !isSidebarOpen),
+                        ),
                       ),
                     ),
-                  ),
 
-                  // NEW: PROFILE SECTION (Fills the top space when open)
-                  if (isSidebarOpen) ...[
+                    // PROFILE SECTION
                     const SizedBox(height: 20),
                     const CircleAvatar(
                       radius: 40,
@@ -106,36 +129,34 @@ class _TeacherPageState extends State<TeacherPage> {
                       style: TextStyle(color: Colors.grey, fontSize: 12),
                     ),
                     const SizedBox(height: 30),
-                  ],
 
-                  // NAVIGATION MENU
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: menuTitles.length,
-                      itemBuilder: (context, index) {
-                        final selected = index == selectedIndex;
-                        return ListTile(
-                          // Icons hidden when closed as requested
-                          leading: isSidebarOpen
-                              ? Icon(menuIcons[index], color: selected ? Colors.blue : null)
-                              : null,
-                          title: isSidebarOpen
-                              ? Text(menuTitles[index],
-                              style: TextStyle(
-                                fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-                                color: selected ? Colors.blue : null,
-                              ))
-                              : null,
-                          selected: selected,
-                          selectedTileColor: Colors.blue.withOpacity(0.05),
-                          onTap: () => setState(() => selectedIndex = index),
-                        );
-                      },
+                    // NAVIGATION MENU
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: menuTitles.length,
+                        itemBuilder: (context, index) {
+                          final selected = index == selectedIndex;
+                          return ListTile(
+                            leading: Icon(menuIcons[index], color: selected ? Colors.blue : null),
+                            title: Text(menuTitles[index],
+                                style: TextStyle(
+                                  fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                                  color: selected ? Colors.blue : null,
+                                )),
+                            selected: selected,
+                            selectedTileColor: Colors.blue.withOpacity(0.05),
+                            onTap: () {
+                              setState(() {
+                                selectedIndex = index;
+                                isSidebarOpen = false;
+                              });
+                            },
+                          );
+                        },
+                      ),
                     ),
-                  ),
 
-                  // BOTTOM SECTION: THEME & LOGOUT
-                  if (isSidebarOpen)
+                    // BOTTOM SECTION: THEME & LOGOUT
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       child: Container(
@@ -153,27 +174,27 @@ class _TeacherPageState extends State<TeacherPage> {
                       ),
                     ),
 
-                  ListTile(
-                    leading: isSidebarOpen
-                        ? const Icon(Icons.logout, color: Colors.redAccent)
-                        : null,
-                    title: isSidebarOpen
-                        ? const Text('Logout', style: TextStyle(color: Colors.redAccent))
-                        : null,
-                    onTap: () => Navigator.pushReplacementNamed(context, '/login'),
-                  ),
-                  const SizedBox(height: 20),
-                ],
+                    ListTile(
+                      leading: const Icon(Icons.logout, color: Colors.redAccent),
+                      title: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
+                      onTap: () => Navigator.pushReplacementNamed(context, '/login'),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+                ),
               ),
             ),
 
-            // ================= MAIN CONTENT =================
-            Expanded(
-              child: Container(
-                color: widget.isDarkMode ? Colors.grey[900] : Colors.white,
-                child: _buildSection(),
+            // ================= HAMBURGER MENU BUTTON (Floating) =================
+            if (!isSidebarOpen)
+              Positioned(
+                top: 16,
+                left: 16,
+                child: IconButton(
+                  icon: const Icon(Icons.menu),
+                  onPressed: () => setState(() => isSidebarOpen = true),
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -266,22 +287,30 @@ class _TeacherPageState extends State<TeacherPage> {
   }
 
   Widget _activitiesSection() {
-    return _genericSection(
-      'Teacher Activities',
-      ListView.builder(
-        itemCount: 5,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        itemBuilder: (context, index) => Card(
-          margin: const EdgeInsets.only(bottom: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: ListTile(
-            leading: const Icon(Icons.description, color: Colors.blue),
-            title: Text('Module ${index + 1}: Lesson Topic'),
-            subtitle: const Text('Posted on Oct 24, 2023'),
-            trailing: const Icon(Icons.more_vert),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 70, 24, 20),
+          child: const Text('Teacher Activities', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+        ),
+        Expanded(
+          child: ListView.builder(
+            itemCount: 5,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            itemBuilder: (context, index) => Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: ListTile(
+                leading: const Icon(Icons.description, color: Colors.blue),
+                title: Text('Module ${index + 1}: Lesson Topic'),
+                subtitle: const Text('Posted on Oct 24, 2023'),
+                trailing: const Icon(Icons.more_vert),
+              ),
+            ),
           ),
         ),
-      ),
+      ],
     );
   }
 

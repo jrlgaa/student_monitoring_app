@@ -1,3 +1,4 @@
+// dart
 import 'package:flutter/material.dart';
 
 class TeacherPage extends StatefulWidget {
@@ -37,6 +38,26 @@ class _TeacherPageState extends State<TeacherPage> {
     Icons.calendar_month,
     Icons.person,
   ];
+
+  // Attendance state
+  final List<String> students = [
+    'Dometita, Rainer',
+    'Mendoza, Ryan Caesar',
+    'Gaa, Jeriel',
+    'Tagapan, Jhem',
+    'Tayag, Joshua',
+    'Ravida, Kris Lawrenc'
+  ];
+  final Map<int, String> attendanceStatus = {};
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize attendance status for each student to a safe default
+    for (var i = 0; i < students.length; i++) {
+      attendanceStatus[i] = 'Present';
+    }
+  }
 
   @override
   void dispose() {
@@ -264,12 +285,18 @@ class _TeacherPageState extends State<TeacherPage> {
   // ================= SECTION SWITCHER =================
   Widget _buildSection() {
     switch (selectedIndex) {
-      case 0: return _activitiesSection();
-      case 1: return _genericSection('Student Grades', const Center(child: Text('Grades List Here')));
-      case 2: return _genericSection('Announcements', const Center(child: Text('Announcements List')));
-      case 4: return _genericSection('Attendance Records', const Center(child: Text('Attendance Data')));
-      case 5: return _genericSection('Teacher Profile', _profileContent());
-      default: return const SizedBox();
+      case 0:
+        return _activitiesSection();
+      case 1:
+        return _genericSection('Student Grades', const Center(child: Text('Grades List Here')));
+      case 2:
+        return _genericSection('Announcements', const Center(child: Text('Announcements List')));
+      case 3:
+        return _attendanceSection();
+      case 4:
+        return _genericSection('Teacher Profile', _profileContent());
+      default:
+        return const SizedBox();
     }
   }
 
@@ -277,8 +304,9 @@ class _TeacherPageState extends State<TeacherPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Increased left padding so the title clears the floating hamburger/menu area.
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 20),
+          padding: const EdgeInsets.fromLTRB(72, 22, 24, 20),
           child: Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
         ),
         Expanded(child: content),
@@ -290,9 +318,26 @@ class _TeacherPageState extends State<TeacherPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Header row aligned with the floating hamburger (placed at top: 16, left: 16)
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 70, 24, 20),
-          child: const Text('Teacher Activities', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          // top set to 16 so it aligns vertically with the floating IconButton
+          padding: const EdgeInsets.fromLTRB(16, 16, 24, 20),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: const [
+              // Reserve horizontal space for the floating hamburger button
+              SizedBox(width: 48),
+
+              // Small gap between the hamburger area and the title
+              SizedBox(width: 8),
+
+              // The actual title
+              Text(
+                'Teacher Activities',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
         ),
         Expanded(
           child: ListView.builder(
@@ -308,6 +353,57 @@ class _TeacherPageState extends State<TeacherPage> {
                 trailing: const Icon(Icons.more_vert),
               ),
             ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ================= ATTENDANCE SECTION =================
+  Widget _attendanceSection() {
+    if (students.isEmpty) {
+      return _genericSection('Attendance Records', const Center(child: Text('No students available')));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Ensure title clears floating hamburger
+        Padding(
+          padding: const EdgeInsets.fromLTRB(72, 22, 24, 12),
+          child: const Text('Attendance Records', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+        ),
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            itemCount: students.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final name = students[index];
+              final current = attendanceStatus[index] ?? 'Present';
+              return Card(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: ListTile(
+                  leading: CircleAvatar(child: Text(name.split(' ').map((s) => s.isNotEmpty ? s[0] : '').take(2).join())),
+                  title: Text(name),
+                  subtitle: const Text('Tap to change status'),
+                  trailing: DropdownButton<String>(
+                    value: current,
+                    items: const [
+                      DropdownMenuItem(value: 'Present', child: Text('Present')),
+                      DropdownMenuItem(value: 'Absent', child: Text('Absent')),
+                      DropdownMenuItem(value: 'Late', child: Text('Late')),
+                    ],
+                    onChanged: (val) {
+                      if (val == null) return;
+                      setState(() {
+                        attendanceStatus[index] = val;
+                      });
+                    },
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ],

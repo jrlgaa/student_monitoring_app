@@ -392,7 +392,7 @@ class _TeacherPageState extends State<TeacherPage> {
                     items: const [
                       DropdownMenuItem(value: 'Present', child: Text('Present')),
                       DropdownMenuItem(value: 'Absent', child: Text('Absent')),
-                      DropdownMenuItem(value: 'Late', child: Text('Late')),
+                      DropdownMenuItem(value: 'Lates', child: Text('Late')),
                     ],
                     onChanged: (val) {
                       if (val == null) return;

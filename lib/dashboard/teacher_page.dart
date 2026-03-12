@@ -1,5 +1,7 @@
 // dart
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:io';
 
 class TeacherPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -18,6 +20,18 @@ class TeacherPage extends StatefulWidget {
 class _TeacherPageState extends State<TeacherPage> {
   int selectedIndex = 0;
   bool isSidebarOpen = false;
+
+  // File upload state
+  PlatformFile? _selectedFile;
+
+  // Activity model
+  final List<Map<String, dynamic>> _activities = [
+    {'title': 'Module 1: Introduction', 'description': 'Basic concepts and fundamentals', 'fileName': 'intro.pdf', 'date': 'Oct 24, 2023'},
+    {'title': 'Module 2: Advanced Topics', 'description': 'Deep dive into advanced concepts', 'fileName': 'advanced.pdf', 'date': 'Oct 25, 2023'},
+    {'title': 'Module 3: Practice Exercises', 'description': 'Hands-on practice problems', 'fileName': null, 'date': 'Oct 26, 2023'},
+    {'title': 'Module 4: Case Studies', 'description': 'Real-world applications', 'fileName': 'cases.docx', 'date': 'Oct 27, 2023'},
+    {'title': 'Module 5: Final Review', 'description': 'Comprehensive review material', 'fileName': 'review.pptx', 'date': 'Oct 28, 2023'},
+  ];
 
   // Controllers for the upload modal
   final TextEditingController _activityTitleController = TextEditingController();
@@ -223,60 +237,153 @@ class _TeacherPageState extends State<TeacherPage> {
   }
 
   // ================= UPLOAD MODAL LOGIC =================
+  Future<void> _pickFile() async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.any,
+      allowMultiple: false,
+    );
+
+    if (result != null && result.files.isNotEmpty) {
+      setState(() {
+        _selectedFile = result!.files.first;
+      });
+    }
+  }
+
+  void _clearFile() {
+    setState(() {
+      _selectedFile = null;
+    });
+  }
+
   void _showUploadModal(BuildContext context) {
+    // Reset file selection when opening modal
+    _selectedFile = null;
+    
     showModalBottomSheet(
       context: context,
       isScrollControlled: true, // Allows modal to move up with keyboard
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom, // Keyboard padding
-          left: 20, right: 20, top: 20,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Upload New Activity',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-            TextField(
-              controller: _activityTitleController,
-              decoration: const InputDecoration(
-                labelText: 'Activity Title',
-                border: OutlineInputBorder(),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom, // Keyboard padding
+            left: 20, right: 20, top: 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Upload New Activity',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              TextField(
+                controller: _activityTitleController,
+                decoration: const InputDecoration(
+                  labelText: 'Activity Title',
+                  border: OutlineInputBorder(),
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _activityDescController,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                labelText: 'Description / Instructions',
-                border: OutlineInputBorder(),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _activityDescController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Description / Instructions',
+                  border: OutlineInputBorder(),
+                ),
               ),
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                onPressed: () {
-                  // Handle logic to add activity here
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Activity uploaded successfully!')),
-                  );
-                  _activityTitleController.clear();
-                  _activityDescController.clear();
-                },
-                child: const Text('Post Activity'),
+              const SizedBox(height: 16),
+              // File Upload Section
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade400),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: _selectedFile != null
+                    ? Row(
+                        children: [
+                          const Icon(Icons.attach_file, color: Colors.blue),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _selectedFile!.name,
+                              style: const TextStyle(fontSize: 14),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.red),
+                            onPressed: () {
+                              setModalState(() {
+                                _selectedFile = null;
+                              });
+                              setState(() {});
+                            },
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                        ],
+                      )
+                    : InkWell(
+                        onTap: () async {
+                          await _pickFile();
+                          setModalState(() {});
+                        },
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.upload_file, color: Colors.grey.shade600),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Tap to attach file',
+                              style: TextStyle(color: Colors.grey.shade600),
+                            ),
+                          ],
+                        ),
+                      ),
               ),
-            ),
-            const SizedBox(height: 20),
-          ],
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: () {
+                    // Create new activity with file
+                    final newActivity = {
+                      'title': _activityTitleController.text,
+                      'description': _activityDescController.text,
+                      'fileName': _selectedFile?.name,
+                      'filePath': _selectedFile?.path,
+                      'date': 'Just now',
+                    };
+                    
+                    setState(() {
+                      _activities.insert(0, newActivity);
+                    });
+                    
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(_selectedFile != null 
+                          ? 'Activity with file uploaded successfully!' 
+                          : 'Activity uploaded successfully!'),
+                      ),
+                    );
+                    _activityTitleController.clear();
+                    _activityDescController.clear();
+                    _selectedFile = null;
+                  },
+                  child: const Text('Post Activity'),
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
         ),
       ),
     );
@@ -341,21 +448,97 @@ class _TeacherPageState extends State<TeacherPage> {
         ),
         Expanded(
           child: ListView.builder(
-            itemCount: 5,
+            itemCount: _activities.length,
             padding: const EdgeInsets.symmetric(horizontal: 10),
-            itemBuilder: (context, index) => Card(
-              margin: const EdgeInsets.only(bottom: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              child: ListTile(
-                leading: const Icon(Icons.description, color: Colors.blue),
-                title: Text('Module ${index + 1}: Lesson Topic'),
-                subtitle: const Text('Posted on Oct 24, 2023'),
-                trailing: const Icon(Icons.more_vert),
-              ),
-            ),
+            itemBuilder: (context, index) {
+              final activity = _activities[index];
+              final String? fileName = activity['fileName'];
+              
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: ListTile(
+                  leading: Icon(
+                    fileName != null ? Icons.insert_drive_file : Icons.description,
+                    color: Colors.blue,
+                  ),
+                  title: Text(activity['title'] ?? 'Untitled'),
+                  subtitle: Text('Posted on ${activity['date']}'),
+                  trailing: fileName != null
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.attach_file, size: 16, color: Colors.grey.shade600),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.more_vert),
+                          ],
+                        )
+                      : const Icon(Icons.more_vert),
+                  onTap: fileName != null
+                      ? () => _showFileDetails(context, activity)
+                      : null,
+                ),
+              );
+            },
           ),
         ),
       ],
+    );
+  }
+
+  // Show file details dialog
+  void _showFileDetails(BuildContext context, Map<String, dynamic> activity) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Activity Details'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              activity['title'] ?? 'Untitled',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+            const SizedBox(height: 8),
+            Text(activity['description'] ?? 'No description'),
+            const SizedBox(height: 16),
+            if (activity['fileName'] != null) ...[
+              const Text(
+                'Attached File:',
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.insert_drive_file, color: Colors.blue),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        activity['fileName'],
+                        style: const TextStyle(fontSize: 14),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
     );
   }
 

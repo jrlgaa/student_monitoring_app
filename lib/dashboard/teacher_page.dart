@@ -90,6 +90,7 @@ class _TeacherPageState extends State<TeacherPage> {
   // Enhanced Attendance state
   DateTime _selectedAttendanceDate = DateTime.now();
   final Map<String, Map<int, String>> _attendanceRecords = {}; // date string -> student index -> status
+  Map<int, String> _currentAttendance = {}; // Current attendance being edited (not saved yet)
 
   @override
   void initState() {
@@ -811,6 +812,7 @@ class _TeacherPageState extends State<TeacherPage> {
     if (picked != null && picked != _selectedAttendanceDate) {
       setState(() {
         _selectedAttendanceDate = picked;
+        _currentAttendance = {}; // Clear current attendance for new date
       });
     }
   }
@@ -827,9 +829,8 @@ class _TeacherPageState extends State<TeacherPage> {
 
   void _saveAttendance() {
     final key = _getDateKey(_selectedAttendanceDate);
-    final currentAttendance = _getAttendanceForDate(_selectedAttendanceDate);
     setState(() {
-      _attendanceRecords[key] = currentAttendance;
+      _attendanceRecords[key] = Map.from(_currentAttendance);
     });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Attendance saved for ${_formatDate(_selectedAttendanceDate)}')),
@@ -908,7 +909,10 @@ class _TeacherPageState extends State<TeacherPage> {
       return _genericSection('Attendance Records', const Center(child: Text('No students available')));
     }
 
-    final currentAttendance = _getAttendanceForDate(_selectedAttendanceDate);
+    // Initialize _currentAttendance if empty (new date selected)
+    if (_currentAttendance.isEmpty) {
+      _currentAttendance = _getAttendanceForDate(_selectedAttendanceDate);
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -977,7 +981,7 @@ class _TeacherPageState extends State<TeacherPage> {
         // Attendance Summary
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _buildAttendanceSummary(currentAttendance),
+          child: _buildAttendanceSummary(_currentAttendance),
         ),
 
         // Student list
@@ -988,7 +992,7 @@ class _TeacherPageState extends State<TeacherPage> {
             separatorBuilder: (_, __) => const SizedBox(height: 8),
             itemBuilder: (context, index) {
               final name = students[index];
-              final current = currentAttendance[index];
+              final current = _currentAttendance[index];
               return Card(
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 child: ListTile(
@@ -1063,7 +1067,7 @@ class _TeacherPageState extends State<TeacherPage> {
                     onChanged: (val) {
                       if (val == null) return;
                       setState(() {
-                        currentAttendance[index] = val;
+                        _currentAttendance[index] = val;
                       });
                     },
                   ),

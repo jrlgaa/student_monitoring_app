@@ -30,7 +30,7 @@ class _TeacherPageState extends State<TeacherPage> {
     {'title': 'Module 2: Advanced Topics', 'description': 'Deep dive into advanced concepts', 'fileName': 'advanced.pdf', 'date': 'Oct 25, 2023'},
     {'title': 'Module 3: Practice Exercises', 'description': 'Hands-on practice problems', 'fileName': null, 'date': 'Oct 26, 2023'},
     {'title': 'Module 4: Case Studies', 'description': 'Real-world applications', 'fileName': 'cases.docx', 'date': 'Oct 27, 2023'},
-    {'title': 'Module 5: Final Review', 'description': 'Comprehensive review material', 'fileName': 'review.pptx', 'date': 'Oct 28, 2023'},
+    {'title': 'Module 5: Final Review', 'description': 'Com prehensive review material', 'fileName': 'review.pptx', 'date': 'Oct 28, 2023'},
   ];
 
   // Announcements model
@@ -86,6 +86,10 @@ class _TeacherPageState extends State<TeacherPage> {
     'Ravida, Kris Lawrenc'
   ];
   final Map<int, String> attendanceStatus = {};
+  
+  // Enhanced Attendance state
+  DateTime _selectedAttendanceDate = DateTime.now();
+  final Map<String, Map<int, String>> _attendanceRecords = {}; // date string -> student index -> status
 
   @override
   void initState() {
@@ -772,19 +776,209 @@ class _TeacherPageState extends State<TeacherPage> {
   }
 
   // ================= ATTENDANCE SECTION =================
+  String _formatDate(DateTime date) {
+    final months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    return '${months[date.month - 1]} ${date.day}, ${date.year}';
+  }
+
+  String _getDateKey(DateTime date) {
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  Map<int, String> _getAttendanceForDate(DateTime date) {
+    final key = _getDateKey(date);
+    if (_attendanceRecords.containsKey(key)) {
+      return Map.from(_attendanceRecords[key]!);
+    }
+    // Return default all present for new dates
+    return {for (var i = 0; i < students.length; i++) i: 'Present'};
+  }
+
+  int _getCountForStatus(Map<int, String> attendanceMap, String status) {
+    return attendanceMap.values.where((s) => s == status).length;
+  }
+
+  Future<void> _selectAttendanceDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedAttendanceDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked != null && picked != _selectedAttendanceDate) {
+      setState(() {
+        _selectedAttendanceDate = picked;
+      });
+    }
+  }
+
+  void _markAllPresent() {
+    final key = _getDateKey(_selectedAttendanceDate);
+    setState(() {
+      _attendanceRecords[key] = {for (var i = 0; i < students.length; i++) i: 'Present'};
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('All students marked as Present')),
+    );
+  }
+
+  void _saveAttendance() {
+    final key = _getDateKey(_selectedAttendanceDate);
+    final currentAttendance = _getAttendanceForDate(_selectedAttendanceDate);
+    setState(() {
+      _attendanceRecords[key] = currentAttendance;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Attendance saved for ${_formatDate(_selectedAttendanceDate)}')),
+    );
+  }
+
+  Widget _buildAttendanceSummary(Map<int, String> attendanceMap) {
+    final present = _getCountForStatus(attendanceMap, 'Present');
+    final absent = _getCountForStatus(attendanceMap, 'Absent');
+    final late = _getCountForStatus(attendanceMap, 'Late');
+    final total = students.length;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Attendance Summary',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildSummaryItem('Total', total, Colors.blue),
+                _buildSummaryItem('Present', present, Colors.green),
+                _buildSummaryItem('Absent', absent, Colors.red),
+                _buildSummaryItem('Late', late, Colors.orange),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummaryItem(String label, int count, Color color) {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            shape: BoxShape.circle,
+          ),
+          child: Text(
+            count.toString(),
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.grey[600],
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _attendanceSection() {
     if (students.isEmpty) {
       return _genericSection('Attendance Records', const Center(child: Text('No students available')));
     }
 
+    final currentAttendance = _getAttendanceForDate(_selectedAttendanceDate);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Ensure title clears floating hamburger
+        // Header
         Padding(
-          padding: const EdgeInsets.fromLTRB(72, 22, 24, 12),
-          child: const Text('Attendance Records', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          padding: const EdgeInsets.fromLTRB(16, 16, 24, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: const [
+              SizedBox(width: 48),
+              SizedBox(width: 8),
+              Text(
+                'Attendance Records',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
         ),
+
+        // Date selector and action buttons
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              // Date selector
+              Expanded(
+                child: InkWell(
+                  onTap: () => _selectAttendanceDate(context),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade400),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today, size: 20, color: Colors.blue),
+                        const SizedBox(width: 8),
+                        Text(
+                          _formatDate(_selectedAttendanceDate),
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Mark All Present button
+              ElevatedButton.icon(
+                onPressed: _markAllPresent,
+                icon: const Icon(Icons.check_circle, size: 18),
+                label: const Text('Mark All Present'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // Attendance Summary
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _buildAttendanceSummary(currentAttendance),
+        ),
+
+        // Student list
         Expanded(
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -792,30 +986,105 @@ class _TeacherPageState extends State<TeacherPage> {
             separatorBuilder: (_, __) => const SizedBox(height: 8),
             itemBuilder: (context, index) {
               final name = students[index];
-              final current = attendanceStatus[index] ?? 'Present';
+              final current = currentAttendance[index] ?? 'Present';
               return Card(
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 child: ListTile(
-                  leading: CircleAvatar(child: Text(name.split(' ').map((s) => s.isNotEmpty ? s[0] : '').take(2).join())),
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.blue.shade100,
+                    child: Text(
+                      name.split(' ').map((s) => s.isNotEmpty ? s[0] : '').take(2).join(),
+                      style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
+                    ),
+                  ),
                   title: Text(name),
-                  subtitle: const Text('Tap to change status'),
                   trailing: DropdownButton<String>(
                     value: current,
-                    items: const [
-                      DropdownMenuItem(value: 'Present', child: Text('Present')),
-                      DropdownMenuItem(value: 'Absent', child: Text('Absent')),
-                      DropdownMenuItem(value: 'Lates', child: Text('Late')),
+                    underline: const SizedBox(),
+                    items: [
+                      DropdownMenuItem(
+                        value: 'Present',
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: Colors.green,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            const Text('Present'),
+                          ],
+                        ),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Absent',
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: Colors.red,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            const Text('Absent'),
+                          ],
+                        ),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Late',
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: Colors.orange,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            const Text('Late'),
+                          ],
+                        ),
+                      ),
                     ],
                     onChanged: (val) {
                       if (val == null) return;
                       setState(() {
-                        attendanceStatus[index] = val;
+                        currentAttendance[index] = val;
                       });
                     },
                   ),
                 ),
               );
             },
+          ),
+        ),
+
+        // Save button
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton.icon(
+              onPressed: _saveAttendance,
+              icon: const Icon(Icons.save),
+              label: const Text('Save Attendance'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+              ),
+            ),
           ),
         ),
       ],

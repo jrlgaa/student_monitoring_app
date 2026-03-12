@@ -73,6 +73,8 @@ class _MyAppState extends State<MyApp> {
 
         // Guardian Portal - Passed parameters
         '/guardian-dashboard': (context) => GuardianPage(
+          toggleTheme: toggleTheme,
+          isDarkMode: isDarkMode,
         ),
 
         // Admin Portal - Passed parameters

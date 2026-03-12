@@ -793,8 +793,8 @@ class _TeacherPageState extends State<TeacherPage> {
     if (_attendanceRecords.containsKey(key)) {
       return Map.from(_attendanceRecords[key]!);
     }
-    // Return default all present for new dates
-    return {for (var i = 0; i < students.length; i++) i: 'Present'};
+    // Return empty map for new dates - no default status
+    return {};
   }
 
   int _getCountForStatus(Map<int, String> attendanceMap, String status) {
@@ -840,6 +840,7 @@ class _TeacherPageState extends State<TeacherPage> {
     final present = _getCountForStatus(attendanceMap, 'Present');
     final absent = _getCountForStatus(attendanceMap, 'Absent');
     final late = _getCountForStatus(attendanceMap, 'Late');
+    final notMarked = students.length - present - absent - late;
     final total = students.length;
 
     return Card(
@@ -863,6 +864,7 @@ class _TeacherPageState extends State<TeacherPage> {
                 _buildSummaryItem('Present', present, Colors.green),
                 _buildSummaryItem('Absent', absent, Colors.red),
                 _buildSummaryItem('Late', late, Colors.orange),
+                _buildSummaryItem('Not Marked', notMarked, Colors.grey),
               ],
             ),
           ],
@@ -986,7 +988,7 @@ class _TeacherPageState extends State<TeacherPage> {
             separatorBuilder: (_, __) => const SizedBox(height: 8),
             itemBuilder: (context, index) {
               final name = students[index];
-              final current = currentAttendance[index] ?? 'Present';
+              final current = currentAttendance[index];
               return Card(
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 child: ListTile(
@@ -1000,6 +1002,7 @@ class _TeacherPageState extends State<TeacherPage> {
                   title: Text(name),
                   trailing: DropdownButton<String>(
                     value: current,
+                    hint: const Text('Select status'),
                     underline: const SizedBox(),
                     items: [
                       DropdownMenuItem(

@@ -56,6 +56,10 @@ class _TeacherPageState extends State<TeacherPage> {
   final TextEditingController _activityTitleController = TextEditingController();
   final TextEditingController _activityDescController = TextEditingController();
 
+  // Controllers for the announcement modal
+  final TextEditingController _announcementTitleController = TextEditingController();
+  final TextEditingController _announcementMessageController = TextEditingController();
+
   final List<String> menuTitles = [
     'Activities',
     'Students',
@@ -96,6 +100,8 @@ class _TeacherPageState extends State<TeacherPage> {
   void dispose() {
     _activityTitleController.dispose();
     _activityDescController.dispose();
+    _announcementTitleController.dispose();
+    _announcementMessageController.dispose();
     super.dispose();
   }
 
@@ -105,11 +111,19 @@ class _TeacherPageState extends State<TeacherPage> {
       // FIX: Prevents layout overflow when the keyboard opens for uploading
       resizeToAvoidBottomInset: false,
 
-      // Floating Action Button only appears when "Activities" is selected
+      // Floating Action Button only appears when "Activities" or "Announcements" is selected
       floatingActionButton: selectedIndex == 0
           ? FloatingActionButton.extended(
         onPressed: () => _showUploadModal(context),
         label: const Text('Upload Activity'),
+        icon: const Icon(Icons.add),
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+      )
+          : selectedIndex == 2
+          ? FloatingActionButton.extended(
+        onPressed: () => _showAnnouncementModal(context),
+        label: const Text('Post Announcement'),
         icon: const Icon(Icons.add),
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
@@ -403,6 +417,102 @@ class _TeacherPageState extends State<TeacherPage> {
               const SizedBox(height: 20),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  // ================= ANNOUNCEMENT MODAL LOGIC =================
+  String _getCurrentDate() {
+    final now = DateTime.now();
+    final months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    return '${months[now.month - 1]} ${now.day}, ${now.year}';
+  }
+
+  void _showAnnouncementModal(BuildContext context) {
+    // Clear controllers when opening modal
+    _announcementTitleController.clear();
+    _announcementMessageController.clear();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+          left: 20, right: 20, top: 20,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Post New Announcement',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _announcementTitleController,
+              decoration: const InputDecoration(
+                labelText: 'Announcement Title',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _announcementMessageController,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                labelText: 'Announcement Message',
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                onPressed: () {
+                  if (_announcementTitleController.text.isEmpty ||
+                      _announcementMessageController.text.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Please fill in all fields'),
+                      ),
+                    );
+                    return;
+                  }
+
+                  // Create new announcement
+                  final newAnnouncement = {
+                    'title': _announcementTitleController.text,
+                    'message': _announcementMessageController.text,
+                    'date': _getCurrentDate(),
+                  };
+
+                  setState(() {
+                    _announcements.insert(0, newAnnouncement);
+                  });
+
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Announcement posted successfully!'),
+                    ),
+                  );
+                  _announcementTitleController.clear();
+                  _announcementMessageController.clear();
+                },
+                child: const Text('Post Announcement'),
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
         ),
       ),
     );

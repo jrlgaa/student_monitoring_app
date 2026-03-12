@@ -60,6 +60,12 @@ class _TeacherPageState extends State<TeacherPage> {
   final TextEditingController _announcementTitleController = TextEditingController();
   final TextEditingController _announcementMessageController = TextEditingController();
 
+  // Edit controllers
+  late final TextEditingController _editActivityTitleController;
+  late final TextEditingController _editActivityDescController;
+  late final TextEditingController _editAnnouncementTitleController;
+  late final TextEditingController _editAnnouncementMessageController;
+
   final List<String> menuTitles = [
     'Activities',
     'Students',
@@ -95,18 +101,28 @@ class _TeacherPageState extends State<TeacherPage> {
   @override
   void initState() {
     super.initState();
+    // Initialize edit controllers
+    _editActivityTitleController = TextEditingController();
+    _editActivityDescController = TextEditingController();
+    _editAnnouncementTitleController = TextEditingController();
+    _editAnnouncementMessageController = TextEditingController();
+
     // Initialize attendance status for each student to a safe default
     for (var i = 0; i < students.length; i++) {
       attendanceStatus[i] = 'Present';
     }
   }
 
-  @override
+@override
   void dispose() {
     _activityTitleController.dispose();
     _activityDescController.dispose();
     _announcementTitleController.dispose();
     _announcementMessageController.dispose();
+    _editActivityTitleController.dispose();
+    _editActivityDescController.dispose();
+    _editAnnouncementTitleController.dispose();
+    _editAnnouncementMessageController.dispose();
     super.dispose();
   }
 
@@ -597,20 +613,26 @@ class _TeacherPageState extends State<TeacherPage> {
                     color: Colors.blue,
                   ),
                   title: Text(activity['title'] ?? 'Untitled'),
-                  subtitle: Text('Posted on ${activity['date']}'),
-                  trailing: fileName != null
-                      ? Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.attach_file, size: 16, color: Colors.grey.shade600),
-                            const SizedBox(width: 4),
-                            const Icon(Icons.more_vert),
-                          ],
-                        )
-                      : const Icon(Icons.more_vert),
-                  onTap: fileName != null
-                      ? () => _showFileDetails(context, activity)
-                      : null,
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (activity['description'] != null && activity['description'].isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4.0),
+                          child: Text(activity['description']),
+                        ),
+                      Text('Posted on ${activity['date']}'),
+                    ],
+                  ),
+                  trailing: PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert),
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, size: 20), SizedBox(width: 8), Text('Edit')])),
+                      const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, size: 20, color: Colors.red), SizedBox(width: 8), Text('Delete')])),
+                    ],
+                    onSelected: (value) => _handleActivityMenuAction(value, index),
+                  ),
+                  onTap: fileName != null ? () => _showFileDetails(context, activity) : null,
                 ),
               );
             },
@@ -655,33 +677,18 @@ class _TeacherPageState extends State<TeacherPage> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 elevation: 2,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
+                child: ListTile(
+                  leading: Icon(
+                    Icons.campaign,
+                    color: Colors.blue.shade700,
+                  ),
+                  title: Text(
+                    announcement['title'] ?? 'Untitled',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Title with icon
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.campaign,
-                            color: Colors.blue.shade700,
-                            size: 24,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              announcement['title'] ?? 'Untitled',
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      // Message / Description
                       Text(
                         announcement['message'] ?? '',
                         style: TextStyle(
@@ -690,8 +697,7 @@ class _TeacherPageState extends State<TeacherPage> {
                           height: 1.5,
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      // Date Posted
+                      const SizedBox(height: 4),
                       Row(
                         children: [
                           Icon(
@@ -710,6 +716,14 @@ class _TeacherPageState extends State<TeacherPage> {
                         ],
                       ),
                     ],
+                  ),
+                  trailing: PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert),
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, size: 20), SizedBox(width: 8), Text('Edit')])),
+                      const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, size: 20, color: Colors.red), SizedBox(width: 8), Text('Delete')])),
+                    ],
+                    onSelected: (value) => _handleAnnouncementMenuAction(value, index),
                   ),
                 ),
               );
@@ -1095,6 +1109,233 @@ class _TeacherPageState extends State<TeacherPage> {
           ),
         ),
       ],
+    );
+  }
+
+  void _handleActivityMenuAction(String action, int index) {
+    final activity = _activities[index];
+    if (action == 'edit') {
+      _editActivityTitleController.text = activity['title'] ?? '';
+      _editActivityDescController.text = activity['description'] ?? '';
+      _showEditActivityModal(index);
+    } else if (action == 'delete') {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Delete Activity'),
+          content: const Text('Are you sure you want to delete this activity?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _activities.removeAt(index);
+                });
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Activity deleted successfully')),
+                );
+              },
+              child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  void _handleAnnouncementMenuAction(String action, int index) {
+    final announcement = _announcements[index];
+    if (action == 'edit') {
+      _editAnnouncementTitleController.text = announcement['title'] ?? '';
+      _editAnnouncementMessageController.text = announcement['message'] ?? '';
+      _showEditAnnouncementModal(index);
+    } else if (action == 'delete') {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Delete Announcement'),
+          content: const Text('Are you sure you want to delete this announcement?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _announcements.removeAt(index);
+                });
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Announcement deleted successfully')),
+                );
+              },
+              child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  void _showEditActivityModal(int index) {
+    PlatformFile? editFile = null; // Note: File edit not implemented as per requirements focus on text fields
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+            left: 20, right: 20, top: 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Edit Activity',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              TextField(
+                controller: _editActivityTitleController,
+                decoration: const InputDecoration(
+                  labelText: 'Activity Title',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _editActivityDescController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Description / Instructions',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // File section (view current, note: replace not implemented)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade400),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _activities[index]['fileName'] != null 
+                    ? 'Current file: ${_activities[index]['fileName']}\n(Replacement not implemented)'
+                    : 'No file attached',
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _activities[index]['title'] = _editActivityTitleController.text;
+                          _activities[index]['description'] = _editActivityDescController.text;
+                          _activities[index]['date'] = _getCurrentDate();
+                        });
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Activity updated successfully')),
+                        );
+                      },
+                      child: const Text('Update Activity'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showEditAnnouncementModal(int index) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+          left: 20, right: 20, top: 20,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Edit Announcement',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _editAnnouncementTitleController,
+              decoration: const InputDecoration(
+                labelText: 'Announcement Title',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _editAnnouncementMessageController,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                labelText: 'Announcement Message',
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      setState(() {
+                        _announcements[index]['title'] = _editAnnouncementTitleController.text;
+                        _announcements[index]['message'] = _editAnnouncementMessageController.text;
+                        _announcements[index]['date'] = _getCurrentDate();
+                      });
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Announcement updated successfully')),
+                      );
+                    },
+                    child: const Text('Update Announcement'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
     );
   }
 

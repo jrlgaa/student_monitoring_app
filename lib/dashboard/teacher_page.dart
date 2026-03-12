@@ -33,6 +33,25 @@ class _TeacherPageState extends State<TeacherPage> {
     {'title': 'Module 5: Final Review', 'description': 'Comprehensive review material', 'fileName': 'review.pptx', 'date': 'Oct 28, 2023'},
   ];
 
+  // Announcements model
+  final List<Map<String, dynamic>> _announcements = [
+    {
+      'title': 'Quiz Reminder',
+      'message': 'There will be a short quiz about HTML Basics in our next meeting. Please review the lesson and prepare your notes.',
+      'date': 'March 15, 2026',
+    },
+    {
+      'title': 'Activity Submission',
+      'message': 'Please submit your Inventory System UI Design before the deadline. Make sure all sections are complete.',
+      'date': 'March 18, 2026',
+    },
+    {
+      'title': 'New Learning Materials',
+      'message': 'The lesson slides about HTML and CSS have been uploaded. You can download the file in the Activities section.',
+      'date': 'March 12, 2026',
+    },
+  ];
+
   // Controllers for the upload modal
   final TextEditingController _activityTitleController = TextEditingController();
   final TextEditingController _activityDescController = TextEditingController();
@@ -397,7 +416,7 @@ class _TeacherPageState extends State<TeacherPage> {
       case 1:
         return _genericSection('Student Grades', const Center(child: Text('Grades List Here')));
       case 2:
-        return _genericSection('Announcements', const Center(child: Text('Announcements List')));
+        return _announcementsSection();
       case 3:
         return _attendanceSection();
       case 4:
@@ -477,6 +496,106 @@ class _TeacherPageState extends State<TeacherPage> {
                   onTap: fileName != null
                       ? () => _showFileDetails(context, activity)
                       : null,
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ================= ANNOUNCEMENTS SECTION =================
+  Widget _announcementsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header row aligned with the floating hamburger
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 24, 20),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: const [
+              // Reserve horizontal space for the floating hamburger button
+              SizedBox(width: 48),
+              // Small gap between the hamburger area and the title
+              SizedBox(width: 8),
+              // The actual title
+              Text(
+                'Announcements',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            itemCount: _announcements.length,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemBuilder: (context, index) {
+              final announcement = _announcements[index];
+              return Card(
+                margin: const EdgeInsets.only(bottom: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                elevation: 2,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Title with icon
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.campaign,
+                            color: Colors.blue.shade700,
+                            size: 24,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              announcement['title'] ?? 'Untitled',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      // Message / Description
+                      Text(
+                        announcement['message'] ?? '',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: widget.isDarkMode ? Colors.grey[300] : Colors.grey[700],
+                          height: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      // Date Posted
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.access_time,
+                            size: 14,
+                            color: Colors.grey[500],
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Posted on ${announcement['date']}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               );
             },

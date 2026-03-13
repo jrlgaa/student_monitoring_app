@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 
 class GuardianPage extends StatefulWidget {
-  const GuardianPage({super.key});
+  final VoidCallback toggleTheme;
+  final bool isDarkMode;
 
-
+  const GuardianPage({
+    super.key,
+    required this.toggleTheme,
+    required this.isDarkMode,
+  });
 
   @override
   State<GuardianPage> createState() => _GuardianPageState();
@@ -14,98 +19,160 @@ class _GuardianPageState extends State<GuardianPage> {
   bool isSidebarOpen = false;
 
   final List<String> menuTitles = [
-    'Activity',
-    'Activity Grades',
-    'Student Grades',
+    'Activities',
+    'tudent Grades',
     'Announcements',
-    'Messages',
     'Attendance',
     'Profile',
   ];
 
   final List<IconData> menuIcons = [
-    Icons.folder_outlined,
-    Icons.bar_chart_rounded,
-    Icons.groups_outlined,
-    Icons.newspaper_rounded,
-    Icons.email_outlined,
-    Icons.calendar_month_outlined,
-    Icons.person_outline,
+    Icons.folder,
+    Icons.school,
+    Icons.campaign,
+    Icons.calendar_month,
+    Icons.person,
   ];
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
     return Scaffold(
-      // FIX 1: Prevent the keyboard from causing overflow if it opens
+      // FIX: Prevents layout overflow when the keyboard opens for uploading
       resizeToAvoidBottomInset: false,
+
       body: SafeArea(
-        child: Row(
+        child: Stack(
           children: [
-            // ================= SIDEBAR =================
-            AnimatedContainer(
+            // ================= MAIN CONTENT =================
+            Container(
+              color: widget.isDarkMode ? Colors.grey[900] : Colors.white,
+              child: _buildSection(),
+            ),
+
+            // ================= OVERLAY SIDEBAR =================
+            if (isSidebarOpen)
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: () => setState(() => isSidebarOpen = false),
+                  child: Container(color: Colors.black26),
+                ),
+              ),
+
+            // ================= SIDEBAR DRAWER =================
+            AnimatedPositioned(
               duration: const Duration(milliseconds: 300),
-              width: isSidebarOpen ? 240 : 80,
-              color: isDark ? Colors.grey[850] : Colors.grey[200],
-              child: Column(
-                children: [
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: 80,
-                    height: 50,
-                    child: Center(
-                      child: IconButton(
-                        icon: const Icon(Icons.menu),
-                        onPressed: () => setState(() => isSidebarOpen = !isSidebarOpen),
+              left: isSidebarOpen ? 0 : -260,
+              top: 0,
+              bottom: 0,
+              width: 260,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: widget.isDarkMode ? Colors.grey[900] : Colors.white,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 10,
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 12),
+                    // HAMBURGER MENU ICON
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: Center(
+                        child: IconButton(
+                          icon: const Icon(Icons.menu),
+                          onPressed: () => setState(() => isSidebarOpen = !isSidebarOpen),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
 
-                  // Navigation Items
-                  Expanded(
-                    child: ListView.builder(
-                      padding: EdgeInsets.zero, // FIX 2: Remove default padding
-                      itemCount: menuTitles.length,
-                      itemBuilder: (context, index) {
-                        final selected = index == selectedIndex;
-                        return ListTile(
-                          leading: SizedBox(
-                            width: 32,
-                            child: Icon(menuIcons[index],
-                                color: selected ? Colors.blue : null),
+                    // PROFILE SECTION
+                    const SizedBox(height: 20),
+                    const CircleAvatar(
+                      radius: 40,
+                      backgroundColor: Colors.blue,
+                      child: Icon(Icons.person, size: 40, color: Colors.white),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      "Maria Santos",
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    const Text(
+                      "Guardian ID: G2024-001",
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                    const SizedBox(height: 30),
+
+                    // NAVIGATION MENU
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: menuTitles.length,
+                        itemBuilder: (context, index) {
+                          final selected = index == selectedIndex;
+                          return ListTile(
+                            leading: Icon(menuIcons[index], color: selected ? Colors.blue : null),
+                            title: Text(menuTitles[index],
+                                style: TextStyle(
+                                  fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                                  color: selected ? Colors.blue : null,
+                                )),
+                            selected: selected,
+                            selectedTileColor: Colors.blue.withOpacity(0.05),
+                            onTap: () {
+                              setState(() {
+                                selectedIndex = index;
+                                isSidebarOpen = false;
+                              });
+                            },
+                          );
+                        },
+                      ),
+                    ),
+
+                    // BOTTOM SECTION: THEME & LOGOUT
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.blue.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: ListTile(
+                          title: const Text("Dark Mode"),
+                          trailing: Switch(
+                            value: widget.isDarkMode,
+                            onChanged: (_) => widget.toggleTheme(),
                           ),
-                          title: isSidebarOpen ? Text(menuTitles[index], maxLines: 1) : null,
-                          selected: selected,
-                          selectedTileColor: Colors.blue.withOpacity(0.1),
-                          onTap: () => setState(() => selectedIndex = index),
-                        );
-                      },
+                        ),
+                      ),
                     ),
-                  ),
-                  const Divider(),
-                  // Logout Button at bottom
-                  ListTile(
-                    leading: const SizedBox(
-                      width: 32,
-                      child: Icon(Icons.logout, color: Colors.redAccent),
+
+                    ListTile(
+                      leading: const Icon(Icons.logout, color: Colors.redAccent),
+                      title: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
+                      onTap: () => Navigator.pushReplacementNamed(context, '/login'),
                     ),
-                    title: isSidebarOpen ? const Text('Logout') : null,
-                    onTap: () => Navigator.pushReplacementNamed(context, '/login'),
-                  ),
-                  const SizedBox(height: 10),
-                ],
+                    const SizedBox(height: 20),
+                  ],
+                ),
               ),
             ),
 
-            // ================= MAIN CONTENT =================
-            Expanded(
-              child: Container(
-                color: isDark ? Colors.grey[900] : Colors.white,
-                child: _buildSection(),
+            // ================= HAMBURGER MENU BUTTON (Floating) =================
+            if (!isSidebarOpen)
+              Positioned(
+                top: 16,
+                left: 16,
+                child: IconButton(
+                  icon: const Icon(Icons.menu),
+                  onPressed: () => setState(() => isSidebarOpen = true),
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -114,42 +181,47 @@ class _GuardianPageState extends State<GuardianPage> {
 
   Widget _buildSection() {
     switch (selectedIndex) {
-      case 0: return _activitySection();
-      case 1: return _activityGradesSection();
-      case 2: return _studentGradesSection();
-      case 3: return _announcementsSection();
-      case 5: return _attendanceSection();
-      case 6: return _profileSection();
-      default: return _genericSection(menuTitles[selectedIndex], const Center(child: Text("Content coming soon")));
+      case 0:
+        return _activitySection();
+      case 1:
+        return _studentGradesSection();
+      case 2:
+        return _announcementsSection();
+      case 3:
+        return _attendanceSection();
+      case 4:
+        return _genericSection('Profile', _profileContent());
+      default:
+        return const SizedBox();
     }
   }
 
-  // Helper for Pinned Header Layout
   Widget _genericSection(String title, Widget content) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Increased left padding so the title clears the floating hamburger/menu area.
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 20),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Flexible( // FIX 3: Prevent title text from overflowing horizontally
-                child: Text(
-                  title,
-                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (selectedIndex == 0 && isSidebarOpen == false)
-                const Text("Welcome!", style: TextStyle(color: Colors.grey, fontSize: 12)),
-            ],
-          ),
+          padding: const EdgeInsets.fromLTRB(72, 22, 24, 20),
+          child: Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
         ),
         Expanded(child: content),
       ],
     );
   }
+
+  Widget _profileContent() => Padding(
+    padding: const EdgeInsets.all(20),
+    child: Card(
+      child: ListTile(
+        leading: const CircleAvatar(child: Icon(Icons.person)),
+        title: const Text('Maria Santos'),
+        subtitle: const Text('guardian@school.com'),
+      ),
+    ),
+  );
+
+
 
   // ================= 5. PROFILE (The most likely culprit for overflow) =================
   Widget _profileSection() {

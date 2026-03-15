@@ -24,33 +24,11 @@ class _TeacherPageState extends State<TeacherPage> {
   // File upload state
   PlatformFile? _selectedFile;
 
-  // Activity model
-  final List<Map<String, dynamic>> _activities = [
-    {'title': 'Module 1: Introduction', 'description': 'Basic concepts and fundamentals', 'fileName': 'intro.pdf', 'date': 'Oct 24, 2023'},
-    {'title': 'Module 2: Advanced Topics', 'description': 'Deep dive into advanced concepts', 'fileName': 'advanced.pdf', 'date': 'Oct 25, 2023'},
-    {'title': 'Module 3: Practice Exercises', 'description': 'Hands-on practice problems', 'fileName': null, 'date': 'Oct 26, 2023'},
-    {'title': 'Module 4: Case Studies', 'description': 'Real-world applications', 'fileName': 'cases.docx', 'date': 'Oct 27, 2023'},
-    {'title': 'Module 5: Final Review', 'description': 'Com prehensive review material', 'fileName': 'review.pptx', 'date': 'Oct 28, 2023'},
-  ];
+  // Activity model - starts empty
+  List<Map<String, dynamic>> _activities = [];
 
-  // Announcements model
-  final List<Map<String, dynamic>> _announcements = [
-    {
-      'title': 'Quiz Reminder',
-      'message': 'There will be a short quiz about HTML Basics in our next meeting. Please review the lesson and prepare your notes.',
-      'date': 'March 15, 2026',
-    },
-    {
-      'title': 'Activity Submission',
-      'message': 'Please submit your Inventory System UI Design before the deadline. Make sure all sections are complete.',
-      'date': 'March 18, 2026',
-    },
-    {
-      'title': 'New Learning Materials',
-      'message': 'The lesson slides about HTML and CSS have been uploaded. You can download the file in the Activities section.',
-      'date': 'March 12, 2026',
-    },
-  ];
+  // Announcements model - starts empty
+  List<Map<String, dynamic>> _announcements = [];
 
   // Controllers for the upload modal
   final TextEditingController _activityTitleController = TextEditingController();
@@ -624,46 +602,62 @@ class _TeacherPageState extends State<TeacherPage> {
           ),
         ),
         Expanded(
-          child: ListView.builder(
-            itemCount: _activities.length,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            itemBuilder: (context, index) {
-              final activity = _activities[index];
-              final String? fileName = activity['fileName'];
-              
-              return Card(
-                margin: const EdgeInsets.only(bottom: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                child: ListTile(
-                  leading: Icon(
-                    fileName != null ? Icons.insert_drive_file : Icons.description,
-                    color: Colors.blue,
-                  ),
-                  title: Text(activity['title'] ?? 'Untitled'),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (activity['description'] != null && activity['description'].isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4.0),
-                          child: Text(activity['description']),
-                        ),
-                      Text('Posted on ${activity['date']}'),
-                    ],
-                  ),
-                  trailing: PopupMenuButton<String>(
-                    icon: const Icon(Icons.more_vert),
-                    itemBuilder: (context) => [
-                      const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, size: 20), SizedBox(width: 8), Text('Edit')])),
-                      const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, size: 20, color: Colors.red), SizedBox(width: 8), Text('Delete')])),
-                    ],
-                    onSelected: (value) => _handleActivityMenuAction(value, index),
-                  ),
-                  onTap: fileName != null ? () => _showFileDetails(context, activity) : null,
+          child: _activities.isEmpty
+            ? const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.folder_open, size: 64, color: Colors.grey),
+                    SizedBox(height: 16),
+                    Text('No activities posted yet',
+                      style: TextStyle(fontSize: 18, color: Colors.grey),
+                    ),
+                    Text('Upload your first activity!', 
+                      style: const TextStyle(fontSize: 14, color: Colors.grey),
+                    ),
+                  ],
                 ),
-              );
-            },
-          ),
+              )
+            : ListView.builder(
+                itemCount: _activities.length,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                itemBuilder: (context, index) {
+                  final activity = _activities[index];
+                  final String? fileName = activity['fileName'];
+                  
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    child: ListTile(
+                      leading: Icon(
+                        fileName != null ? Icons.insert_drive_file : Icons.description,
+                        color: Colors.blue,
+                      ),
+                      title: Text(activity['title'] ?? 'Untitled'),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (activity['description'] != null && activity['description'].isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 4.0),
+                              child: Text(activity['description']),
+                            ),
+                          Text('Posted on ${activity['date']}'),
+                        ],
+                      ),
+                      trailing: PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert),
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, size: 20), SizedBox(width: 8), Text('Edit')])),
+                          const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, size: 20, color: Colors.red), SizedBox(width: 8), Text('Delete')])),
+                        ],
+                        onSelected: (value) => _handleActivityMenuAction(value, index),
+                      ),
+                      onTap: fileName != null ? () => _showFileDetails(context, activity) : null,
+                    ),
+                  );
+                },
+              ),
         ),
       ],
     );
@@ -693,69 +687,82 @@ class _TeacherPageState extends State<TeacherPage> {
           ),
         ),
         Expanded(
-          child: ListView.builder(
-            itemCount: _announcements.length,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemBuilder: (context, index) {
-              final announcement = _announcements[index];
-              return Card(
-                margin: const EdgeInsets.only(bottom: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+          child: _announcements.isEmpty
+            ? const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.campaign_outlined, size: 64, color: Colors.grey),
+                    SizedBox(height: 16),
+                    Text('No announcements yet',
+                      style: TextStyle(fontSize: 18, color: Colors.grey),
+                    ),
+                  ],
                 ),
-                elevation: 2,
-                child: ListTile(
-                  leading: Icon(
-                    Icons.campaign,
-                    color: Colors.blue.shade700,
-                  ),
-                  title: Text(
-                    announcement['title'] ?? 'Untitled',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        announcement['message'] ?? '',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: widget.isDarkMode ? Colors.grey[300] : Colors.grey[700],
-                          height: 1.5,
-                        ),
+              )
+            : ListView.builder(
+                itemCount: _announcements.length,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemBuilder: (context, index) {
+                  final announcement = _announcements[index];
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 2,
+                    child: ListTile(
+                      leading: Icon(
+                        Icons.campaign,
+                        color: Colors.blue.shade700,
                       ),
-                      const SizedBox(height: 4),
-                      Row(
+                      title: Text(
+                        announcement['title'] ?? 'Untitled',
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(
-                            Icons.access_time,
-                            size: 14,
-                            color: Colors.grey[500],
-                          ),
-                          const SizedBox(width: 4),
                           Text(
-                            'Posted on ${announcement['date']}',
+                            announcement['message'] ?? '',
                             style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[500],
+                              fontSize: 14,
+                              color: widget.isDarkMode ? Colors.grey[300] : Colors.grey[700],
+                              height: 1.5,
                             ),
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.access_time,
+                                size: 14,
+                                color: Colors.grey[500],
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Posted on ${announcement['date']}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[500],
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                    ],
-                  ),
-                  trailing: PopupMenuButton<String>(
-                    icon: const Icon(Icons.more_vert),
-                    itemBuilder: (context) => [
-                      const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, size: 20), SizedBox(width: 8), Text('Edit')])),
-                      const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, size: 20, color: Colors.red), SizedBox(width: 8), Text('Delete')])),
-                    ],
-                    onSelected: (value) => _handleAnnouncementMenuAction(value, index),
-                  ),
-                ),
-              );
-            },
-          ),
+                      trailing: PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert),
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, size: 20), SizedBox(width: 8), Text('Edit')])),
+                          const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, size: 20, color: Colors.red), SizedBox(width: 8), Text('Delete')])),
+                        ],
+                        onSelected: (value) => _handleAnnouncementMenuAction(value, index),
+                      ),
+                    ),
+                  );
+                },
+              ),
         ),
       ],
     );

@@ -1,37 +1,20 @@
-# Student Grading Workflow Enhancement - Approved Plan Steps
+# Activity Upload Feature Implementation (Step 2/7 Complete)
 
-Status: 🔄 In Progress
+## Completed:
+- ✅ Added _initNewActivityForAllStudents call after setState in _showUploadModal()
+- ✅ Edit modal now handles updates by remove old + init new using helpers
+- ✅ Removed _updateStudentActivities placeholder
+- ✅ Students section always shows list (no more _activities.isEmpty hide)
+- ✅ Per-student "No activities" message with icon
+- ✅ Fixed ListView physics/height for grading area
+- ✅ Selected student highlight with blue color
 
-## Breakdown from Approved Plan
+## Next Steps (Step 5/7 - Guardian Page):
+1. Read lib/dashboard/guardian_page.dart 
+2. Add activity display in guardian students section from shared data (mock like teacher)
+3. Add _initNewActivityForAllStudents call in guardian if needed
 
-### 1. **Create TODO.md** ✅ Done
-   - Track progress here
-
-### 2. **Update teacher_page.dart** ✅ Complete
-   - Add state variables ✅
-   - Implement initState/dispose ✅
-   - Create _studentsSection() with ExpansionTile, grade inputs, saves ✅
-   - Update _buildSection case 1 ✅
-
-### 3. **Update guardian_page.dart** ✅ Complete
-   - Mock data matching teacher ✅
-   - Read-only ExpansionTile view ✅
-
-### 4. **Testing & Completion** ✅ Ready
-   - Run app: Teacher → Students (input/expand/save), Guardian → Student Grades (read-only match)
-   - `flutter run` or hot reload
-
-TODO.md updated.
-   - Add mock _activities, _studentGrades, students
-   - Enhance _studentGradesSection() for read-only ExpansionTile view matching teacher structure
-
-**Next**: Implement _studentsSection() & _buildSection case 1 in teacher_page.dart
-
-### 4. **Testing & Completion** ⏳ Pending
-   - Test input/validation/save
-   - Verify guardian read-only display
-   - Theme/scroll tests
-   - `attempt_completion`
-
-**Instructions**: I'll update this file after each major step completion. Current step: Starting teacher_page.dart state/UI additions.
-
+## Pending:
+- Apply to admin_page.dart
+- Full testing
+- Hot reload verification

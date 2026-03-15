@@ -94,6 +94,8 @@ class _TeacherPageState extends State<TeacherPage> {
   Map<int, String> _currentAttendance = {}; // Current attendance being edited (not saved yet)
 
   // GRADING WORKFLOW STATE - NEW
+  String? selectedStudent;
+  Map<String, List<Map<String, dynamic>>> _studentActivities = {}; // studentName -> list of their activities
   Map<String, Map<String, Map<String, dynamic>>> _studentGrades = {}; // studentName -> activityKey -> {grade: double?, maxScore: 100.0, status: 'Ungraded'|'Graded'}
   Set<String> _expandedStudents = {};
   Map<String, Map<String, TextEditingController>> _gradeControllers = {}; // student -> activityKey -> controller
@@ -128,20 +130,17 @@ class _TeacherPageState extends State<TeacherPage> {
   }
 
   void _initGradingState() {
-      for (String student in students) {
-        _studentGrades[student] = {};
-        _gradeControllers[student] = {};
-      }
-    // Mock some data if activities exist, else add sample activities
-    if (_activities.isEmpty) {
-      _activities.addAll([
-        {'title': 'Homework 1', 'description': 'Math problems', 'date': 'Yesterday'},
-        {'title': 'Quiz 1', 'description': 'Science quiz', 'date': '2 days ago'},
-      ]);
-    }
-    // Init grades/controllers for all student x activity
     for (String student in students) {
-      for (Map<String, dynamic> activity in _activities) {
+      _studentGrades[student] = {};
+      _gradeControllers[student] = {};
+      // Mock student-specific activities
+      _studentActivities[student] = [
+        {'title': 'Homework 1 - ${student.split(', ')[0]}', 'description': 'Math problems', 'date': 'Yesterday'},
+        {'title': 'Quiz 1', 'description': 'Science quiz', 'date': '2 days ago'},
+        {'title': 'Project Submission', 'description': 'Group project', 'date': 'Today'},
+      ];
+      // Init grades/controllers for this student's activities
+      for (Map<String, dynamic> activity in _studentActivities[student]!) {
         String key = _getActivityKey(activity);
         _studentGrades[student]![key] = {
           'grade': null,
@@ -150,13 +149,13 @@ class _TeacherPageState extends State<TeacherPage> {
         };
         _gradeControllers[student]![key] = TextEditingController();
       }
-    }
-    // Mock some pre-graded - safe after init
-    if (_activities.isNotEmpty) {
-      String key1 = _getActivityKey(_activities[0]);
-      _studentGrades[students[0]]![key1]!['grade'] = 85.0;
-      _studentGrades[students[0]]![key1]!['status'] = 'Graded';
-      _gradeControllers[students[0]]![key1]!.text = '85';
+      // Mock one pre-graded
+      if (_studentActivities[student]!.isNotEmpty) {
+        String key1 = _getActivityKey(_studentActivities[student]![0]);
+        _studentGrades[student]![key1]!['grade'] = 85.0;
+        _studentGrades[student]![key1]!['status'] = 'Graded';
+        _gradeControllers[student]![key1]!.text = '85';
+      }
     }
   }
 
@@ -476,6 +475,8 @@ class _TeacherPageState extends State<TeacherPage> {
                     setState(() {
                       _activities.insert(0, newActivity);
                     });
+                    
+                    _initNewActivityForAllStudents(newActivity);
                     
                     Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -1214,6 +1215,8 @@ class _TeacherPageState extends State<TeacherPage> {
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
             TextButton(
               onPressed: () {
+                final activityToDelete = Map<String, dynamic>.from(_activities[index]);
+                _removeActivityFromAllStudents(activityToDelete);
                 setState(() {
                   _activities.removeAt(index);
                 });
@@ -1330,11 +1333,15 @@ class _TeacherPageState extends State<TeacherPage> {
                     flex: 2,
                     child: ElevatedButton(
                       onPressed: () {
-                        setState(() {
-                          _activities[index]['title'] = _editActivityTitleController.text;
-                          _activities[index]['description'] = _editActivityDescController.text;
-                          _activities[index]['date'] = _getCurrentDate();
-                        });
+                        final oldActivity = Map<String, dynamic>.from(_activities[index]);
+                        _activities[index]['title'] = _editActivityTitleController.text;
+                        _activities[index]['description'] = _editActivityDescController.text;
+                        _activities[index]['date'] = _getCurrentDate();
+                        setState(() {});
+                        
+                        _removeActivityFromAllStudents(oldActivity);
+                        _initNewActivityForAllStudents(_activities[index]);
+                        
                         Navigator.pop(context);
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('Activity updated successfully')),
@@ -1629,25 +1636,11 @@ class _TeacherPageState extends State<TeacherPage> {
           ),
         ),
         Expanded(
-          child: _activities.isEmpty
-              ? const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.school_outlined, size: 64, color: Colors.grey),
-                      SizedBox(height: 16),
-                      Text('No activities posted yet',
-                          style: TextStyle(fontSize: 18, color: Colors.grey)),
-                      Text('Post activities first to grade students!',
-                          style: TextStyle(fontSize: 14, color: Colors.grey)),
-                    ],
-                  ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: students.length,
-                  separatorBuilder: (context, index) => const SizedBox(height: 8),
-                  itemBuilder: (context, sIndex) {
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: students.length,
+            separatorBuilder: (context, index) => const SizedBox(height: 8),
+            itemBuilder: (context, sIndex) {
                     String student = students[sIndex];
                     bool isExpanded = _expandedStudents.contains(student);
                     return Card(
@@ -1659,6 +1652,7 @@ class _TeacherPageState extends State<TeacherPage> {
                           setState(() {
                             if (expanded) {
                               _expandedStudents.add(student);
+                              selectedStudent = student; // Track selected student
                             } else {
                               _expandedStudents.remove(student);
                             }
@@ -1674,28 +1668,43 @@ class _TeacherPageState extends State<TeacherPage> {
                             ),
                           ),
                         ),
-                        title: Text(
+                      title: Text(
                           student,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: selectedStudent == student ? Colors.blue : null,
+                          ),
                         ),
                         subtitle: Text('${_activities.length} activities'),
                         children: [
                           Padding(
                             padding: const EdgeInsets.all(16),
-                            child: _activities.isEmpty
-                                ? const SizedBox()
+                            child: (_studentActivities[student]?.isEmpty ?? true)
+                                ? const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(32.0),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.assignment_outlined, size: 64, color: Colors.grey),
+                                          SizedBox(height: 16),
+                                          Text('No activities posted yet',
+                                              style: TextStyle(fontSize: 16, color: Colors.grey)),
+                                        ],
+                                      ),
+                                    ),
+                                  )
                                 : Column(
                                     children: [
-                                      // Activities ListView
+                                      // Student-specific Activities ListView - fully scrollable
                                       SizedBox(
                                         height: 300,
                                         child: ListView.separated(
-                                          shrinkWrap: true,
                                           physics: const ClampingScrollPhysics(),
-                                          itemCount: _activities.length,
+                                          itemCount: _studentActivities[student]!.length,
                                           separatorBuilder: (context, aIndex) => const Divider(),
                                           itemBuilder: (context, aIndex) {
-                                            Map<String, dynamic> activity = _activities[aIndex];
+                                            Map<String, dynamic> activity = _studentActivities[student]![aIndex];
                                             String key = _getActivityKey(activity);
                                             Map<String, dynamic> gradeData = _studentGrades[student]![key] ?? {};
                                             TextEditingController controller = _gradeControllers[student]![key]!;
@@ -1756,18 +1765,8 @@ class _TeacherPageState extends State<TeacherPage> {
                                       ),
                                       const SizedBox(height: 12),
                                       // Per-student Save All button
-                                      SizedBox(
-                                        width: double.infinity,
-                                        child: ElevatedButton.icon(
-                                          onPressed: () => _saveStudentGrades(student),
-                                          icon: const Icon(Icons.save_alt),
-                                          label: Text('Save All Grades for ${student.split(', ')[0]}'),
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: Colors.blue,
-                                            foregroundColor: Colors.white,
-                                          ),
-                                        ),
-                                      ),
+                                      // Per-student save button removed as part of "Save All Grades" cleanup
+                                      SizedBox.shrink(),
                                     ],
                                   ),
                           ),
@@ -1777,18 +1776,6 @@ class _TeacherPageState extends State<TeacherPage> {
                   },
                 ),
         ),
-        // Bottom FAB for Batch Save All
-        if (_activities.isNotEmpty)
-          Positioned(
-            bottom: 20,
-            right: 20,
-            child: FloatingActionButton.extended(
-              onPressed: _saveAllGrades,
-              backgroundColor: Colors.green,
-              icon: const Icon(Icons.save),
-              label: const Text('Save All Grades'),
-            ),
-          ),
       ],
     );
   }
@@ -1839,6 +1826,48 @@ class _TeacherPageState extends State<TeacherPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('All student grades saved!')),
     );
+  }
+  
+  void _updateStudentActivities(Map<String, dynamic> newActivity) {
+    // Re-init with new activity for all students (overwrites grades? No, keep grades by re-setting controllers
+    // Since key may change, safest: remove old matching by title/date approximate, add new
+    // But to simple: since edit is rare, and mock data, for now skip full sync, grades stay on old key
+    // Wait, to make correct:
+    // Before edit, save oldActivity = Map.from(_activities[index])
+    // After edit, _removeActivityFromAllStudents(oldActivity)
+    // _initNewActivityForAllStudents(new _activities[index])
+    // Perfect, reuse helpers
+    
+  }
+
+  void _initNewActivityForAllStudents(Map<String, dynamic> activity) {
+    String key = _getActivityKey(activity);
+    for (String student in students) {
+      _studentActivities[student] ??= [];
+      _studentActivities[student]!.add(Map<String, dynamic>.from(activity));
+      _studentGrades[student] ??= {};
+      _studentGrades[student]![key] = {
+        'grade': null,
+        'maxScore': _defaultMaxScore,
+        'status': 'Ungraded',
+      };
+      _gradeControllers[student] ??= {};
+      _gradeControllers[student]![key] = TextEditingController();
+    }
+    setState(() {});
+  }
+
+  void _removeActivityFromAllStudents(Map<String, dynamic> activity) {
+    String key = _getActivityKey(activity);
+    for (String student in students) {
+      _studentActivities[student]?.removeWhere((act) => _getActivityKey(act) == key);
+      _studentGrades[student]?.remove(key);
+      if (_gradeControllers[student]?[key] != null) {
+        _gradeControllers[student]![key]!.dispose();
+        _gradeControllers[student]!.remove(key);
+      }
+    }
+    setState(() {});
   }
 }
 

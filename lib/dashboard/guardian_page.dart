@@ -18,9 +18,26 @@ class _GuardianPageState extends State<GuardianPage> {
   int selectedIndex = 0;
   bool isSidebarOpen = false;
 
+final List<String> students = [
+    'Dometita, Rainer',
+    'Mendoza, Ryan Caesar',
+    'Gaa, Jeriel',
+    'Tagapan, Jhem',
+    'Tayag, Joshua',
+    'Ravida, Kris Lawrence'
+  ];
+
+  // Mock data matching teacher
+  List<Map<String, dynamic>> _activities = [
+    {'title': 'Homework 1', 'description': 'Math problems', 'date': 'Yesterday'},
+    {'title': 'Quiz 1', 'description': 'Science quiz', 'date': '2 days ago'},
+  ];
+
+  Map<String, Map<String, Map<String, dynamic>>> _studentGrades = {}; // student -> activityKey -> data
+
   final List<String> menuTitles = [
     'Activities',
-    'tudent Grades',
+    'Student Grades',
     'Announcements',
     'Attendance',
     'Profile',
@@ -179,6 +196,30 @@ class _GuardianPageState extends State<GuardianPage> {
     );
   }
 
+  @override
+  void initState() {
+    super.initState();
+    _initGuardianGrades();
+  }
+
+  void _initGuardianGrades() {
+    for (String student in students) {
+      _studentGrades[student] = {};
+      for (Map<String, dynamic> activity in _activities) {
+        String key = _getActivityKey(activity);
+        _studentGrades[student]![key] = {
+          'grade': 85.0, // Mock from teacher
+          'maxScore': 100.0,
+          'status': 'Graded',
+        };
+      }
+    }
+  }
+
+  String _getActivityKey(Map<String, dynamic> activity) {
+    return '${activity['title']}_${activity['date']}';
+  }
+
   Widget _buildSection() {
     switch (selectedIndex) {
       case 0:
@@ -276,43 +317,86 @@ class _GuardianPageState extends State<GuardianPage> {
   }
 
   Widget _studentGradesSection() {
-    return _genericSection('Student Grade', SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text("Juan Dela Cruz (Grade 5)", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 20),
-              Row(
-                children: ['Q1', 'Q2', 'Q3', 'Q4'].map((q) => Container(
-                  margin: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(label: Text(q), selected: q == 'Q1'),
-                )).toList(),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 24, 20),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: const [
+              SizedBox(width: 48),
+              SizedBox(width: 8),
+              Text(
+                'Student Grades',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 20),
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 2,
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
-                childAspectRatio: 2.5,
-                children: [
-                  _gradeTile("Filipino", "88"),
-                  _gradeTile("English", "92"),
-                  _gradeTile("Math", "85"),
-                  _gradeTile("Science", "90"),
-                ],
-              )
             ],
           ),
         ),
-      ),
-    ));
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: students.length,
+            separatorBuilder: (context, index) => const SizedBox(height: 8),
+            itemBuilder: (context, sIndex) {
+              String student = students[sIndex];
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: ExpansionTile(
+                  title: Text(student, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text('${_activities.length} activities'),
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        children: _activities.map((activity) {
+                          String key = _getActivityKey(activity);
+                          Map<String, dynamic>? gradeData = _studentGrades[student]?[key];
+                          double? grade = gradeData?['grade'];
+                          String status = gradeData?['status'] ?? 'Ungraded';
+                          return Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(activity['title'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  Text(activity['description'] ?? ''),
+                                  Text('Posted: ${activity['date']}'),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          '${grade?.toStringAsFixed(1) ?? '-'} / 100',
+                                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                      Chip(
+                                        label: Text(status),
+                                        backgroundColor: status == 'Graded' ? Colors.green : Colors.grey,
+                                        labelStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _gradeTile(String subject, String grade) {

@@ -88,10 +88,16 @@ class _TeacherPageState extends State<TeacherPage> {
   ];
   final Map<int, String> attendanceStatus = {};
   
-  // Enhanced Attendance state
+// Enhanced Attendance state
   DateTime _selectedAttendanceDate = DateTime.now();
   final Map<String, Map<int, String>> _attendanceRecords = {}; // date string -> student index -> status
   Map<int, String> _currentAttendance = {}; // Current attendance being edited (not saved yet)
+
+  // GRADING WORKFLOW STATE - NEW
+  Map<String, Map<String, Map<String, dynamic>>> _studentGrades = {}; // studentName -> activityKey -> {grade: double?, maxScore: 100.0, status: 'Ungraded'|'Graded'}
+  Set<String> _expandedStudents = {};
+  Map<String, Map<String, TextEditingController>> _gradeControllers = {}; // student -> activityKey -> controller
+  final double _defaultMaxScore = 100.0;
 
   @override
   void initState() {
@@ -112,10 +118,56 @@ class _TeacherPageState extends State<TeacherPage> {
     for (var i = 0; i < students.length; i++) {
       attendanceStatus[i] = 'Present';
     }
+
+    // INIT GRADING STATE - NEW
+    _initGradingState();
+  }
+
+  String _getActivityKey(Map<String, dynamic> activity) {
+    return '${activity['title']}_${activity['date']}';
+  }
+
+  void _initGradingState() {
+      for (String student in students) {
+        _studentGrades[student] = {};
+        _gradeControllers[student] = {};
+      }
+    // Mock some data if activities exist, else add sample activities
+    if (_activities.isEmpty) {
+      _activities.addAll([
+        {'title': 'Homework 1', 'description': 'Math problems', 'date': 'Yesterday'},
+        {'title': 'Quiz 1', 'description': 'Science quiz', 'date': '2 days ago'},
+      ]);
+    }
+    // Init grades/controllers for all student x activity
+    for (String student in students) {
+      for (Map<String, dynamic> activity in _activities) {
+        String key = _getActivityKey(activity);
+        _studentGrades[student]![key] = {
+          'grade': null,
+          'maxScore': _defaultMaxScore,
+          'status': 'Ungraded',
+        };
+        _gradeControllers[student]![key] = TextEditingController();
+      }
+    }
+    // Mock some pre-graded - safe after init
+    if (_activities.isNotEmpty) {
+      String key1 = _getActivityKey(_activities[0]);
+      _studentGrades[students[0]]![key1]!['grade'] = 85.0;
+      _studentGrades[students[0]]![key1]!['status'] = 'Graded';
+      _gradeControllers[students[0]]![key1]!.text = '85';
+    }
   }
 
 @override
   void dispose() {
+    // Dispose grading controllers
+    for (String student in _gradeControllers.keys) {
+      for (String key in _gradeControllers[student]!.keys) {
+        _gradeControllers[student]![key]!.dispose();
+      }
+    }
     _activityTitleController.dispose();
     _activityDescController.dispose();
     _announcementTitleController.dispose();
@@ -550,7 +602,7 @@ class _TeacherPageState extends State<TeacherPage> {
       case 0:
         return _activitiesSection();
       case 1:
-        return _genericSection('Student Grades', const Center(child: Text('Grades List Here')));
+        return _studentsSection();
       case 2:
         return _announcementsSection();
       case 3:
@@ -1556,4 +1608,237 @@ class _TeacherPageState extends State<TeacherPage> {
       ),
     );
   }
+
+  Widget _studentsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header aligned like other sections
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 24, 20),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: const [
+              SizedBox(width: 48),
+              SizedBox(width: 8),
+              Text(
+                'Student Grades',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _activities.isEmpty
+              ? const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.school_outlined, size: 64, color: Colors.grey),
+                      SizedBox(height: 16),
+                      Text('No activities posted yet',
+                          style: TextStyle(fontSize: 18, color: Colors.grey)),
+                      Text('Post activities first to grade students!',
+                          style: TextStyle(fontSize: 14, color: Colors.grey)),
+                    ],
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: students.length,
+                  separatorBuilder: (context, index) => const SizedBox(height: 8),
+                  itemBuilder: (context, sIndex) {
+                    String student = students[sIndex];
+                    bool isExpanded = _expandedStudents.contains(student);
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: ExpansionTile(
+                        initiallyExpanded: false,
+                        onExpansionChanged: (expanded) {
+                          setState(() {
+                            if (expanded) {
+                              _expandedStudents.add(student);
+                            } else {
+                              _expandedStudents.remove(student);
+                            }
+                          });
+                        },
+                        leading: CircleAvatar(
+                          backgroundColor: Colors.blue.shade100,
+                          child: Text(
+                            student.split(' ').map((s) => s.isNotEmpty ? s[0] : '').take(2).join(),
+                            style: const TextStyle(
+                              color: Colors.blue,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          student,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: Text('${_activities.length} activities'),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: _activities.isEmpty
+                                ? const SizedBox()
+                                : Column(
+                                    children: [
+                                      // Activities ListView
+                                      SizedBox(
+                                        height: 300,
+                                        child: ListView.separated(
+                                          shrinkWrap: true,
+                                          physics: const ClampingScrollPhysics(),
+                                          itemCount: _activities.length,
+                                          separatorBuilder: (context, aIndex) => const Divider(),
+                                          itemBuilder: (context, aIndex) {
+                                            Map<String, dynamic> activity = _activities[aIndex];
+                                            String key = _getActivityKey(activity);
+                                            Map<String, dynamic> gradeData = _studentGrades[student]![key] ?? {};
+                                            TextEditingController controller = _gradeControllers[student]![key]!;
+                                            double? grade = gradeData['grade'];
+                                            String status = gradeData['status'] ?? 'Ungraded';
+                                            return Card(
+                                              child: Padding(
+                                                padding: const EdgeInsets.all(12),
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(activity['title'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                                                    if (activity['description']?.isNotEmpty == true)
+                                                      Padding(
+                                                        padding: const EdgeInsets.symmetric(vertical: 4),
+                                                        child: Text(activity['description']),
+                                                      ),
+                                                    Text('Posted: ${activity['date']}'),
+                                                    const SizedBox(height: 8),
+                                                    Row(
+                                                      children: [
+                                                        Expanded(
+                                                          child: TextField(
+                                                            controller: controller,
+                                                            keyboardType: TextInputType.numberWithOptions(decimal: true),
+                                                            decoration: InputDecoration(
+                                                              labelText: 'Grade / ${_defaultMaxScore}',
+                                                              border: const OutlineInputBorder(),
+                                                              prefixIcon: const Icon(Icons.grade),
+                                                            ),
+                                                            onChanged: (value) {
+                                                              // Live preview update (optional full save)
+                                                            },
+                                                          ),
+                                                        ),
+                                                        const SizedBox(width: 8),
+                                                        Chip(
+                                                          label: Text(status),
+                                                          backgroundColor: status == 'Graded' ? Colors.green : Colors.grey,
+                                                          labelStyle: TextStyle(
+                                                            color: Colors.white,
+                                                            fontWeight: FontWeight.bold,
+                                                          ),
+                                                        ),
+                                                        IconButton(
+                                                          icon: const Icon(Icons.save, color: Colors.blue),
+                                                          onPressed: () => _saveGrade(student, key, controller.text),
+                                                          tooltip: 'Save Grade',
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      // Per-student Save All button
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: ElevatedButton.icon(
+                                          onPressed: () => _saveStudentGrades(student),
+                                          icon: const Icon(Icons.save_alt),
+                                          label: Text('Save All Grades for ${student.split(', ')[0]}'),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.blue,
+                                            foregroundColor: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+        // Bottom FAB for Batch Save All
+        if (_activities.isNotEmpty)
+          Positioned(
+            bottom: 20,
+            right: 20,
+            child: FloatingActionButton.extended(
+              onPressed: _saveAllGrades,
+              backgroundColor: Colors.green,
+              icon: const Icon(Icons.save),
+              label: const Text('Save All Grades'),
+            ),
+          ),
+      ],
+    );
+  }
+
+  void _saveGrade(String student, String activityKey, String gradeText) {
+    double? grade;
+    if (gradeText.isNotEmpty) {
+      grade = double.tryParse(gradeText);
+      if (grade == null || grade < 0 || grade > _defaultMaxScore) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Invalid grade (0-${_defaultMaxScore.toStringAsFixed(0)})')),
+        );
+        return;
+      }
+    }
+    setState(() {
+      _studentGrades[student]![activityKey]!['grade'] = grade;
+      _studentGrades[student]![activityKey]!['status'] = grade != null ? 'Graded' : 'Ungraded';
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Grade saved for $student')),
+    );
+  }
+
+  void _saveStudentGrades(String student) {
+    bool hasChanges = false;
+    for (String key in _gradeControllers[student]!.keys) {
+      String text = _gradeControllers[student]![key]!.text;
+      if (text.isNotEmpty) {
+        double? grade = double.tryParse(text);
+        if (grade != null && grade >= 0 && grade <= _defaultMaxScore) {
+          _saveGrade(student, key, text);
+          hasChanges = true;
+        }
+      }
+    }
+    if (hasChanges) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('All grades saved for $student')),
+      );
+    }
+  }
+
+  void _saveAllGrades() {
+    for (String student in students) {
+      _saveStudentGrades(student);
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('All student grades saved!')),
+    );
+  }
 }
+

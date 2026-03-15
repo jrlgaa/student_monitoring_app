@@ -1,27 +1,37 @@
-# TODO: Match Admin Hamburger Menu to Teacher Page
+# Student Grading Workflow Enhancement - Approved Plan Steps
 
-## Plan Steps:
-- [x] 1. Create TODO.md with steps
-- [ ] 2. Update admin_page.dart: Replace Row with Stack layout (retrying due to diff match error)
-- [ ] 3. Add floating hamburger button and overlay
-- [ ] 4. Implement AnimatedPositioned sidebar with admin content
-- [ ] 5. Update all section title paddings to match teacher_page.dart
-- [ ] 6. Verify animations and no layout stretching
-- [ ] 7. Test and complete
+Status: 🔄 In Progress
 
-All steps complete ✅
+## Breakdown from Approved Plan
 
-The hamburger menu in admin_page.dart now exactly matches teacher_page.dart:
+### 1. **Create TODO.md** ✅ Done
+   - Track progress here
 
-✅ Stack layout with floating hamburger (no stretching)
-✅ AnimatedPositioned sidebar (width 260, slide from -260)
-✅ Overlay for closing
-✅ Exact animations (300ms)
-✅ Matching spacings/paddings (72 left for titles, 16+48+8 for headers)
-✅ Admin menu items preserved
-✅ Profile, theme switch, logout identical
+### 2. **Update teacher_page.dart** ✅ Complete
+   - Add state variables ✅
+   - Implement initState/dispose ✅
+   - Create _studentsSection() with ExpansionTile, grade inputs, saves ✅
+   - Update _buildSection case 1 ✅
 
-Task complete.
+### 3. **Update guardian_page.dart** ✅ Complete
+   - Mock data matching teacher ✅
+   - Read-only ExpansionTile view ✅
 
+### 4. **Testing & Completion** ✅ Ready
+   - Run app: Teacher → Students (input/expand/save), Guardian → Student Grades (read-only match)
+   - `flutter run` or hot reload
 
+TODO.md updated.
+   - Add mock _activities, _studentGrades, students
+   - Enhance _studentGradesSection() for read-only ExpansionTile view matching teacher structure
+
+**Next**: Implement _studentsSection() & _buildSection case 1 in teacher_page.dart
+
+### 4. **Testing & Completion** ⏳ Pending
+   - Test input/validation/save
+   - Verify guardian read-only display
+   - Theme/scroll tests
+   - `attempt_completion`
+
+**Instructions**: I'll update this file after each major step completion. Current step: Starting teacher_page.dart state/UI additions.
 

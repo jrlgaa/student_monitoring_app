@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class SignUpPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -37,10 +38,18 @@ class _SignUpPageState extends State<SignUpPage> {
     super.dispose();
   }
 
-  // Helper to build TextFields
-  Widget _buildTextField(TextEditingController controller, String hint, IconData icon) {
-    return TextField(
+  // Helper to build TextFormFields with optional formatter/validator
+  Widget _buildTextField(
+    TextEditingController controller, 
+    String hint, 
+    IconData icon, {
+    List<TextInputFormatter>? inputFormatters,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
       controller: controller,
+      inputFormatters: inputFormatters,
+      validator: validator,
       decoration: InputDecoration(
         hintText: hint,
         prefixIcon: Icon(icon),
@@ -120,11 +129,39 @@ class _SignUpPageState extends State<SignUpPage> {
               children: [
                 const Text('Create an Account', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 24),
-                _buildTextField(firstNameController, 'First Name', Icons.person_outline),
+                _buildTextField(
+                  firstNameController, 
+                  'First Name', 
+                  Icons.person_outline,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z\s]'))
+                  ],
+                  validator: (value) => value?.trim().isEmpty ?? true 
+                    ? 'Please enter your first name' 
+                    : null,
+                ),
                 const SizedBox(height: 16),
-                _buildTextField(middleNameController, 'Middle Name (Optional)', Icons.person_search_outlined),
+                _buildTextField(
+                  middleNameController, 
+                  'Middle Name (Optional)', 
+                  Icons.person_search_outlined,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z\s]'))
+                  ],
+                  // Optional, no empty validation
+                ),
                 const SizedBox(height: 16),
-                _buildTextField(lastNameController, 'Last Name', Icons.person_outline),
+                _buildTextField(
+                  lastNameController, 
+                  'Last Name', 
+                  Icons.person_outline,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z\s]'))
+                  ],
+                  validator: (value) => value?.trim().isEmpty ?? true 
+                    ? 'Please enter your last name' 
+                    : null,
+                ),
                 const SizedBox(height: 16),
                 _buildTextField(emailController, 'Enter email address', Icons.email_outlined),
                 const SizedBox(height: 16),

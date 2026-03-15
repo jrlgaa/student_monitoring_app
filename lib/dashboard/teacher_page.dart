@@ -133,29 +133,9 @@ class _TeacherPageState extends State<TeacherPage> {
     for (String student in students) {
       _studentGrades[student] = {};
       _gradeControllers[student] = {};
-      // Mock student-specific activities
-      _studentActivities[student] = [
-        {'title': 'Homework 1 - ${student.split(', ')[0]}', 'description': 'Math problems', 'date': 'Yesterday'},
-        {'title': 'Quiz 1', 'description': 'Science quiz', 'date': '2 days ago'},
-        {'title': 'Project Submission', 'description': 'Group project', 'date': 'Today'},
-      ];
-      // Init grades/controllers for this student's activities
-      for (Map<String, dynamic> activity in _studentActivities[student]!) {
-        String key = _getActivityKey(activity);
-        _studentGrades[student]![key] = {
-          'grade': null,
-          'maxScore': _defaultMaxScore,
-          'status': 'Ungraded',
-        };
-        _gradeControllers[student]![key] = TextEditingController();
-      }
-      // Mock one pre-graded
-      if (_studentActivities[student]!.isNotEmpty) {
-        String key1 = _getActivityKey(_studentActivities[student]![0]);
-        _studentGrades[student]![key1]!['grade'] = 85.0;
-        _studentGrades[student]![key1]!['status'] = 'Graded';
-        _gradeControllers[student]![key1]!.text = '85';
-      }
+// Student activities will be populated from teacher-posted _activities
+      // Empty init for grades/controllers (will be added dynamically)
+
     }
   }
 
@@ -1688,7 +1668,7 @@ class _TeacherPageState extends State<TeacherPage> {
                                         children: [
                                           Icon(Icons.assignment_outlined, size: 64, color: Colors.grey),
                                           SizedBox(height: 16),
-                                          Text('No activities posted yet',
+                                          Text('No activities posted by teacher yet. Post activities first.',
                                               style: TextStyle(fontSize: 16, color: Colors.grey)),
                                         ],
                                       ),

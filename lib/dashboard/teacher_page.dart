@@ -60,11 +60,28 @@ class _TeacherPageState extends State<TeacherPage> {
   final TextEditingController _announcementTitleController = TextEditingController();
   final TextEditingController _announcementMessageController = TextEditingController();
 
-  // Edit controllers
+// Edit controllers
   late final TextEditingController _editActivityTitleController;
   late final TextEditingController _editActivityDescController;
   late final TextEditingController _editAnnouncementTitleController;
   late final TextEditingController _editAnnouncementMessageController;
+
+  // Teacher Profile state
+  Map<String, dynamic> teacherProfile = {
+    'name': 'Maria Santos',
+    'teacherId': 'TCH-001',
+    'email': 'maria.santos@school.com',
+    'phone': '+63 912 345 6789',
+    'subject': 'Mathematics',
+    'advisoryClass': 'Grade 7-A',
+  };
+  bool isEditing = false;
+
+  // Profile controllers
+  late final TextEditingController _emailController;
+  late final TextEditingController _phoneController;
+  late final TextEditingController _subjectController;
+  late final TextEditingController _advisoryClassController;
 
   final List<String> menuTitles = [
     'Activities',
@@ -89,7 +106,7 @@ class _TeacherPageState extends State<TeacherPage> {
     'Gaa, Jeriel',
     'Tagapan, Jhem',
     'Tayag, Joshua',
-    'Ravida, Kris Lawrenc'
+    'Ravida, Kris Lawrence'
   ];
   final Map<int, String> attendanceStatus = {};
   
@@ -107,6 +124,12 @@ class _TeacherPageState extends State<TeacherPage> {
     _editAnnouncementTitleController = TextEditingController();
     _editAnnouncementMessageController = TextEditingController();
 
+    // Initialize profile controllers
+    _emailController = TextEditingController(text: teacherProfile['email']);
+    _phoneController = TextEditingController(text: teacherProfile['phone']);
+    _subjectController = TextEditingController(text: teacherProfile['subject']);
+    _advisoryClassController = TextEditingController(text: teacherProfile['advisoryClass']);
+
     // Initialize attendance status for each student to a safe default
     for (var i = 0; i < students.length; i++) {
       attendanceStatus[i] = 'Present';
@@ -123,6 +146,10 @@ class _TeacherPageState extends State<TeacherPage> {
     _editActivityDescController.dispose();
     _editAnnouncementTitleController.dispose();
     _editAnnouncementMessageController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _subjectController.dispose();
+    _advisoryClassController.dispose();
     super.dispose();
   }
 
@@ -209,12 +236,12 @@ class _TeacherPageState extends State<TeacherPage> {
                       child: Icon(Icons.person, size: 40, color: Colors.white),
                     ),
                     const SizedBox(height: 12),
-                    const Text(
-                      "Juan Dela Cruz",
+                    Text(
+                      teacherProfile['name'],
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                     ),
-                    const Text(
-                      "Teacher ID: 2024-001",
+                    Text(
+                      "Teacher ID: ${teacherProfile['teacherId']}",
                       style: TextStyle(color: Colors.grey, fontSize: 12),
                     ),
                     const SizedBox(height: 30),
@@ -1339,14 +1366,187 @@ class _TeacherPageState extends State<TeacherPage> {
     );
   }
 
-  Widget _profileContent() => Padding(
-    padding: const EdgeInsets.all(20),
-    child: Card(
-      child: ListTile(
-        leading: const CircleAvatar(child: Icon(Icons.person)),
-        title: const Text('Juan Dela Cruz'),
-        subtitle: const Text('teacher@deped.gov.ph'),
+  void _toggleEditMode() {
+    setState(() {
+      if (isEditing) {
+        // Save changes
+        teacherProfile['email'] = _emailController.text;
+        teacherProfile['phone'] = _phoneController.text;
+        teacherProfile['subject'] = _subjectController.text;
+        teacherProfile['advisoryClass'] = _advisoryClassController.text;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile updated successfully!')),
+        );
+      }
+      isEditing = !isEditing;
+    });
+  }
+
+  void _cancelEdit() {
+    setState(() {
+      _emailController.text = teacherProfile['email'];
+      _phoneController.text = teacherProfile['phone'];
+      _subjectController.text = teacherProfile['subject'];
+      _advisoryClassController.text = teacherProfile['advisoryClass'];
+      isEditing = false;
+    });
+  }
+
+  Widget _profileContent() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Profile Picture and Read-only Info
+            Card(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 50,
+                      backgroundColor: Colors.blue,
+                      child: Icon(Icons.person, size: 50, color: Colors.white),
+                    ),
+                    const SizedBox(width: 20),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            teacherProfile['name'],
+                            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            'Teacher ID: ${teacherProfile['teacherId']}',
+                            style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            // Editable Information Header
+            Text(
+              'Teacher Information',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            // Email Field
+            Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: ListTile(
+                leading: Icon(Icons.email, color: Colors.blue),
+                title: Text(isEditing ? 'Email' : 'Email'),
+                subtitle: isEditing
+                    ? TextField(
+                        controller: _emailController,
+                        decoration: InputDecoration(
+                          hintText: 'Enter email',
+                          border: InputBorder.none,
+                        ),
+                      )
+                    : Text(teacherProfile['email']),
+              ),
+            ),
+            // Phone Field
+            Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: ListTile(
+                leading: Icon(Icons.phone, color: Colors.blue),
+                title: Text(isEditing ? 'Phone Number' : 'Phone Number'),
+                subtitle: isEditing
+                    ? TextField(
+                        controller: _phoneController,
+                        decoration: InputDecoration(
+                          hintText: 'Enter phone number',
+                          border: InputBorder.none,
+                        ),
+                        keyboardType: TextInputType.phone,
+                      )
+                    : Text(teacherProfile['phone']),
+              ),
+            ),
+            // Subject Field
+            Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: ListTile(
+                leading: Icon(Icons.school, color: Colors.blue),
+                title: Text(isEditing ? 'Subject' : 'Subject'),
+                subtitle: isEditing
+                    ? TextField(
+                        controller: _subjectController,
+                        decoration: InputDecoration(
+                          hintText: 'Enter subject',
+                          border: InputBorder.none,
+                        ),
+                      )
+                    : Text(teacherProfile['subject']),
+              ),
+            ),
+            // Advisory Class Field
+            Card(
+              margin: const EdgeInsets.only(bottom: 24),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: ListTile(
+                leading: Icon(Icons.group, color: Colors.blue),
+                title: Text(isEditing ? 'Advisory Class' : 'Advisory Class'),
+                subtitle: isEditing
+                    ? TextField(
+                        controller: _advisoryClassController,
+                        decoration: InputDecoration(
+                          hintText: 'Enter advisory class',
+                          border: InputBorder.none,
+                        ),
+                      )
+                    : Text(teacherProfile['advisoryClass']),
+              ),
+            ),
+            // Action Buttons
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: isEditing
+                  ? Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: _cancelEdit,
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.grey),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: ElevatedButton.icon(
+                            onPressed: _toggleEditMode,
+                            icon: const Icon(Icons.save),
+                            label: const Text('Save Changes'),
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                          ),
+                        ),
+                      ],
+                    )
+                  : ElevatedButton.icon(
+                      onPressed: _toggleEditMode,
+                      icon: const Icon(Icons.edit),
+                      label: const Text('Edit Profile'),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                    ),
+            ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }

@@ -96,7 +96,7 @@ class _LoginPageState extends State<LoginPage> {
                 TextField(
                   controller: emailController,
                   decoration: InputDecoration(
-                    hintText: 'Email Address',
+                    hintText: 'Email address',
                     prefixIcon: const Icon(Icons.email_outlined),
                     filled: true,
                     fillColor: widget.isDarkMode ? Colors.grey[700]?.withOpacity(0.2) : Colors.grey[100],

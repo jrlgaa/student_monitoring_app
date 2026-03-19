@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:path/path.dart' as p; // FIX: Added 'as p' to avoid Context conflicts
 
 class LoginPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -11,45 +13,73 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  // Controllers and State variables
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
-  bool _obscurePassword = true; // State to track if password is hidden
+  bool _obscurePassword = true;
+  bool _isLoading = false;
 
-  // Dummy Accounts
-  static const String adminEmail = "admin123";
-  static const String teacherEmail = 'teacher@example.com';
-  static const String guardianEmail = 'guardian@example.com';
-  static const String commonPassword = '123456';
+  @override
+  void dispose() {
+    emailController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
 
-  void login() {
+  // --- SQLITE LOGIN LOGIC ---
+  Future<void> login() async {
     String email = emailController.text.trim();
     String password = passwordController.text.trim();
 
     if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in all fields')),
-      );
+      _showSnackBar('Please fill in all fields');
       return;
     }
 
-    if (password == commonPassword) {
-      if (email == teacherEmail) {
-        Navigator.pushReplacementNamed(context, '/teacher-dashboard');
-      } else if (email == guardianEmail) {
-        Navigator.pushReplacementNamed(context, '/guardian-dashboard');
-      } else if (email == adminEmail) {
-        Navigator.pushReplacementNamed(context, '/admin-dashboard');
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid email or password!')),
-        );
-      }
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid email or password!')),
-      );
+    // 1. DIRECT ADMIN SIGN IN (Hardcoded)
+    if (email == "admin123" && password == "123456") {
+      Navigator.pushReplacementNamed(context, '/admin-dashboard');
+      return;
     }
+
+    setState(() => _isLoading = true);
+
+    try {
+      // 2. Open the existing local database [cite: 1, 36]
+      final dbPath = await getDatabasesPath();
+      final path = p.join(dbPath, 'application_data.db'); // FIX: Used p.join
+      final Database db = await openDatabase(path);
+
+      // 3. Query the 'users' table [cite: 36, 37]
+      final List<Map<String, dynamic>> results = await db.query(
+        'users',
+        where: 'email = ? AND password = ?',
+        whereArgs: [email, password],
+      );
+
+      if (results.isNotEmpty) {
+        // Retrieve role and convert to lowercase for comparison [cite: 37, 159]
+        String role = results[0]['role'].toString().toLowerCase();
+
+        if (role == 'teacher') {
+          Navigator.pushReplacementNamed(context, '/teacher-dashboard');
+        } else if (role == 'guardian') {
+          Navigator.pushReplacementNamed(context, '/guardian-dashboard');
+        } else {
+          _showSnackBar('Role "$role" not recognized.');
+        }
+      } else {
+        _showSnackBar('Invalid email or password.');
+      }
+    } catch (e) {
+      _showSnackBar('Database error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  } // Stray 'as BuildContext' removed here
+
+  void _showSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -81,9 +111,9 @@ class _LoginPageState extends State<LoginPage> {
                 const SizedBox(height: 16),
                 const Text(
                   'Student Monitoring Application',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold), textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
                 ),
-
                 const SizedBox(height: 8),
                 Text(
                   'Log in to your account',
@@ -92,7 +122,6 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                // Email Field
                 TextField(
                   controller: emailController,
                   decoration: InputDecoration(
@@ -107,24 +136,18 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                // Password Field with Toggle
                 TextField(
                   controller: passwordController,
-                  obscureText: _obscurePassword, // Controlled by state
+                  obscureText: _obscurePassword,
                   decoration: InputDecoration(
                     hintText: 'Password',
                     prefixIcon: const Icon(Icons.lock_outline),
-                    // Added Suffix Icon for Toggle
                     suffixIcon: IconButton(
                       icon: Icon(
                         _obscurePassword ? Icons.visibility_off : Icons.visibility,
                         color: widget.isDarkMode ? Colors.grey[400] : Colors.grey[600],
                       ),
-                      onPressed: () {
-                        setState(() {
-                          _obscurePassword = !_obscurePassword;
-                        });
-                      },
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                     ),
                     filled: true,
                     fillColor: widget.isDarkMode ? Colors.grey[700]?.withOpacity(0.2) : Colors.grey[100],
@@ -143,8 +166,10 @@ class _LoginPageState extends State<LoginPage> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       elevation: 0,
                     ),
-                    onPressed: login,
-                    child: const Text('Sign in', style: TextStyle(fontSize: 16)),
+                    onPressed: _isLoading ? null : login,
+                    child: _isLoading
+                        ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Text('Sign in', style: TextStyle(fontSize: 16)),
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -156,9 +181,7 @@ class _LoginPageState extends State<LoginPage> {
                       style: TextStyle(color: widget.isDarkMode ? Colors.grey[300] : Colors.grey[700]),
                     ),
                     GestureDetector(
-                      onTap: () {
-                        Navigator.pushNamed(context, '/signup');
-                      },
+                      onTap: () => Navigator.pushNamed(context, '/signup'),
                       child: const Text(
                         'Sign up',
                         style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),

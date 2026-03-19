@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+// IMPORTANT: Pointing to your specific database file
+import 'package:project/database/signup_db.dart';
 
 class SignUpPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -38,18 +40,15 @@ class _SignUpPageState extends State<SignUpPage> {
     super.dispose();
   }
 
-  // Helper to build TextFormFields with optional formatter/validator
   Widget _buildTextField(
-    TextEditingController controller, 
-    String hint, 
-    IconData icon, {
-    List<TextInputFormatter>? inputFormatters,
-    String? Function(String?)? validator,
-  }) {
+      TextEditingController controller,
+      String hint,
+      IconData icon, {
+        List<TextInputFormatter>? inputFormatters,
+      }) {
     return TextFormField(
       controller: controller,
       inputFormatters: inputFormatters,
-      validator: validator,
       decoration: InputDecoration(
         hintText: hint,
         prefixIcon: Icon(icon),
@@ -63,37 +62,54 @@ class _SignUpPageState extends State<SignUpPage> {
     );
   }
 
-  // THE UPDATED VALIDATION LOGIC
-  void _handleSignUp() {
+  Future<void> _handleSignUp() async {
     String email = emailController.text.trim();
 
-    // 1. Check for empty required fields
+    // 1. Basic Validation
     if (firstNameController.text.isEmpty ||
         lastNameController.text.isEmpty ||
         email.isEmpty ||
-        verificationController.text.isEmpty ||
-        passwordController.text.isEmpty ||
-        confirmPasswordController.text.isEmpty) {
+        passwordController.text.isEmpty) {
       _showSnackBar('Please fill in all required fields');
       return;
     }
 
-    // 2. TEACHER EMAIL VALIDATION (@deped.gov.ph)
-    if (role == 'Teacher') {
-      if (!email.endsWith('@deped.gov.ph')) {
-        _showSnackBar('Teachers must use a @deped.gov.ph email address');
-        return;
-      }
+    if (role == 'Teacher' && !email.endsWith('@deped.gov.ph')) {
+      _showSnackBar('Teachers must use a @deped.gov.ph email address');
+      return;
     }
 
-    // 3. Password Match Check
     if (passwordController.text != confirmPasswordController.text) {
       _showSnackBar('Passwords do not match');
       return;
     }
 
-    // Success
-    _showSnackBar('Account created successfully!', isError: false);
+    // 2. Database Action
+    try {
+      // Map keys MUST match the CREATE TABLE columns in signup_db.dart
+      Map<String, dynamic> userRow = {
+        'firstName': firstNameController.text.trim(),
+        'middleName': middleNameController.text.trim(), // Now supported by DB
+        'lastName': lastNameController.text.trim(),
+        'email': email,
+        'role': role,
+        'password': passwordController.text,
+      };
+
+      await DatabaseHelper.instance.registerUser(userRow);
+      _showSnackBar('Account registered successfully!', isError: false);
+
+      Future.delayed(const Duration(seconds: 1), () {
+        if (mounted) Navigator.pushNamed(context, '/login');
+      });
+
+    } catch (e) {
+      if (e.toString().contains('UNIQUE constraint failed')) {
+        _showSnackBar('This email is already in use.');
+      } else {
+        _showSnackBar('Error saving to database: $e');
+      }
+    }
   }
 
   void _showSnackBar(String message, {bool isError = true}) {
@@ -117,11 +133,7 @@ class _SignUpPageState extends State<SignUpPage> {
               color: widget.isDarkMode ? Colors.grey[800] : Colors.white,
               borderRadius: BorderRadius.circular(24),
               boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 15,
-                  offset: const Offset(0, 5),
-                )
+                BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 15, offset: const Offset(0, 5))
               ],
             ),
             child: Column(
@@ -129,50 +141,21 @@ class _SignUpPageState extends State<SignUpPage> {
               children: [
                 const Text('Create an Account', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 24),
-                _buildTextField(
-                  firstNameController, 
-                  'First Name', 
-                  Icons.person_outline,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z\s]'))
-                  ],
-                  validator: (value) => value?.trim().isEmpty ?? true 
-                    ? 'Please enter your first name' 
-                    : null,
-                ),
+                _buildTextField(firstNameController, 'First Name', Icons.person_outline,
+                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z\s]'))]),
                 const SizedBox(height: 16),
-                _buildTextField(
-                  middleNameController, 
-                  'Middle Name (Optional)', 
-                  Icons.person_search_outlined,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z\s]'))
-                  ],
-                  // Optional, no empty validation
-                ),
+                _buildTextField(middleNameController, 'Middle Name (Optional)', Icons.person_search_outlined),
                 const SizedBox(height: 16),
-                _buildTextField(
-                  lastNameController, 
-                  'Last Name', 
-                  Icons.person_outline,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z\s]'))
-                  ],
-                  validator: (value) => value?.trim().isEmpty ?? true 
-                    ? 'Please enter your last name' 
-                    : null,
-                ),
+                _buildTextField(lastNameController, 'Last Name', Icons.person_outline,
+                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z\s]'))]),
                 const SizedBox(height: 16),
                 _buildTextField(emailController, 'Enter email address', Icons.email_outlined),
                 const SizedBox(height: 16),
-
-                // Verification Row
                 Row(
                   children: [
                     Expanded(flex: 2, child: _buildTextField(verificationController, 'Code', Icons.verified_user_outlined)),
                     const SizedBox(width: 8),
                     Expanded(
-                      flex: 1,
                       child: ElevatedButton(
                         onPressed: () => _showSnackBar('Code sent!', isError: false),
                         child: const Text('Get code', style: TextStyle(fontSize: 10)),
@@ -181,8 +164,6 @@ class _SignUpPageState extends State<SignUpPage> {
                   ],
                 ),
                 const SizedBox(height: 16),
-
-                // Role Selector
                 DropdownButtonFormField<String>(
                   value: role,
                   items: roles.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
@@ -195,8 +176,7 @@ class _SignUpPageState extends State<SignUpPage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-
-                // Password with Show/Hide
+                // Using TextField here for obscureText capability
                 TextField(
                   controller: passwordController,
                   obscureText: _obscurePassword,
@@ -213,8 +193,6 @@ class _SignUpPageState extends State<SignUpPage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-
-                // Confirm Password with Show/Hide
                 TextField(
                   controller: confirmPasswordController,
                   obscureText: _obscureConfirmPassword,
@@ -231,19 +209,16 @@ class _SignUpPageState extends State<SignUpPage> {
                   ),
                 ),
                 const SizedBox(height: 24),
-
                 SizedBox(
                   width: double.infinity,
                   height: 50,
-                  child: ElevatedButton(
-                    onPressed: _handleSignUp,
-                    child: const Text('Create Account'),
-                  ),
+                  child: ElevatedButton(onPressed: _handleSignUp, child: const Text('Create Account')),
                 ),
                 const SizedBox(height: 20),
                 GestureDetector(
                   onTap: () => Navigator.pushNamed(context, '/login'),
-                  child: const Text('Already have an account? Log in', style: TextStyle(color: Colors.blue)),
+                  child: const Text('Already have an account? Log in',
+                      style: TextStyle(color: Colors.blue, decoration: TextDecoration.underline)),
                 ),
               ],
             ),

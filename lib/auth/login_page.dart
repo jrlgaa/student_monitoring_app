@@ -46,7 +46,7 @@ class _LoginPageState extends State<LoginPage> {
     try {
       // 2. Open the existing local database [cite: 1, 36]
       final dbPath = await getDatabasesPath();
-      final path = p.join(dbPath, 'application_data.db'); // FIX: Used p.join
+      final path = p.join(dbPath, 'user_data.db'); // FIX: Used p.join
       final Database db = await openDatabase(path);
 
       // 3. Query the 'users' table [cite: 36, 37]

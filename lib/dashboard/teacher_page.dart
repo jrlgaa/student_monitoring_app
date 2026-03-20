@@ -1,7 +1,10 @@
 // dart
 import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
-import 'dart:io';
+import 'package:file_picker/file_picker.dart'; // Handles the picking logic
+import 'dart:io';                             // Handles file paths
+import 'package:path/path.dart' as p;        // Helps join database paths
+import 'package:sqflite/sqflite.dart';       // Required for database types
+import 'package:project/database/teacher_db.dart';
 
 class TeacherPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -121,6 +124,7 @@ class _TeacherPageState extends State<TeacherPage> {
       attendanceStatus[i] = 'Present';
     }
 
+    _fetchDatabaseContent();
     // INIT GRADING STATE - NEW
     _initGradingState();
   }
@@ -327,39 +331,20 @@ class _TeacherPageState extends State<TeacherPage> {
   }
 
   // ================= UPLOAD MODAL LOGIC =================
-  Future<void> _pickFile() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.any,
-      allowMultiple: false,
-    );
-
-    if (result != null && result.files.isNotEmpty) {
-      setState(() {
-        _selectedFile = result!.files.first;
-      });
-    }
-  }
-
-  void _clearFile() {
-    setState(() {
-      _selectedFile = null;
-    });
-  }
-
   void _showUploadModal(BuildContext context) {
-    // Reset file selection when opening modal
+    // Clear file selection when opening modal
     _selectedFile = null;
-    
+
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true, // Allows modal to move up with keyboard
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) => Padding(
           padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom, // Keyboard padding
+            bottom: MediaQuery.of(context).viewInsets.bottom,
             left: 20, right: 20, top: 20,
           ),
           child: Column(
@@ -386,7 +371,8 @@ class _TeacherPageState extends State<TeacherPage> {
                 ),
               ),
               const SizedBox(height: 16),
-              // File Upload Section
+
+              // FILE SELECTION SECTION
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
@@ -396,79 +382,88 @@ class _TeacherPageState extends State<TeacherPage> {
                 ),
                 child: _selectedFile != null
                     ? Row(
-                        children: [
-                          const Icon(Icons.attach_file, color: Colors.blue),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _selectedFile!.name,
-                              style: const TextStyle(fontSize: 14),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.close, color: Colors.red),
-                            onPressed: () {
-                              setModalState(() {
-                                _selectedFile = null;
-                              });
-                              setState(() {});
-                            },
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                          ),
-                        ],
-                      )
+                  children: [
+                    const Icon(Icons.attach_file, color: Colors.blue),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(_selectedFile!.name, overflow: TextOverflow.ellipsis),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.red),
+                      onPressed: () {
+                        // Update BOTH the modal state and the main page state
+                        setModalState(() => _selectedFile = null);
+                        setState(() => _selectedFile = null);
+                      },
+                    ),
+                  ],
+                )
                     : InkWell(
-                        onTap: () async {
-                          await _pickFile();
-                          setModalState(() {});
-                        },
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.upload_file, color: Colors.grey.shade600),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Tap to attach file',
-                              style: TextStyle(color: Colors.grey.shade600),
-                            ),
-                          ],
-                        ),
-                      ),
+                  onTap: () async {
+                    await _pickFile();
+                    // This forces the modal to redraw with the new file name
+                    setModalState(() {});
+                  },
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.upload_file),
+                      SizedBox(width: 8),
+                      Text('Tap to attach file'),
+                    ],
+                  ),
+                ),
               ),
               const SizedBox(height: 20),
               SizedBox(
                 width: double.infinity,
                 height: 50,
                 child: ElevatedButton(
-                  onPressed: () {
-                    // Create new activity with file
-                    final newActivity = {
-                      'title': _activityTitleController.text,
-                      'description': _activityDescController.text,
-                      'fileName': _selectedFile?.name,
-                      'filePath': _selectedFile?.path,
-                      'date': 'Just now',
+                  onPressed: () async {
+                    String title = _activityTitleController.text.trim();
+                    String desc = _activityDescController.text.trim();
+
+                    if (title.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Please enter a title')),
+                      );
+                      return;
+                    }
+
+                    final activityData = {
+                      'title': title,
+                      'description': desc,
+                      'fileName': _selectedFile?.name ?? '',
+                      'filePath': _selectedFile?.path ?? '',
+                      'date': DateTime.now().toString(),
                     };
-                    
-                    setState(() {
-                      _activities.insert(0, newActivity);
-                    });
-                    
-                    _initNewActivityForAllStudents(newActivity);
-                    
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(_selectedFile != null 
-                          ? 'Activity with file uploaded successfully!' 
-                          : 'Activity uploaded successfully!'),
-                      ),
-                    );
-                    _activityTitleController.clear();
-                    _activityDescController.clear();
-                    _selectedFile = null;
+
+                    try {
+                      // Save to SQLite
+                      await ActivityDatabase.instance.insertActivity(activityData);
+
+                      // Update UI Local State
+                      setState(() {
+                        _activities.insert(0, activityData);
+                      });
+
+                      _initNewActivityForAllStudents(activityData);
+
+                      if (mounted) {
+                        Navigator.pop(context);
+                        _activityTitleController.clear();
+                        _activityDescController.clear();
+                        _selectedFile = null;
+
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Activity saved successfully!')),
+                        );
+                      }
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Database Error: $e')),
+                      );
+                    }
                   },
                   child: const Text('Post Activity'),
                 ),
@@ -479,6 +474,53 @@ class _TeacherPageState extends State<TeacherPage> {
         ),
       ),
     );
+  }
+
+  // This method handles the actual communication with the phone's file system
+  Future<void> _pickFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.any,
+        allowMultiple: false,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        // We use setState to tell the UI (and the Modal) to refresh
+        // and show the name of the file we just picked.
+        setState(() {
+          _selectedFile = result.files.first;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error picking file: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error picking file: $e')),
+        );
+      }
+    }
+  }
+
+  // Add this method inside _TeacherPageState
+  // Update this method in _TeacherPageState
+  Future<void> _fetchDatabaseContent() async {
+    try {
+      // Fetch both activities and announcements
+      final data = await ActivityDatabase.instance.getActivities();
+      final announcementData = await ActivityDatabase.instance.getAnnouncements();
+
+      setState(() {
+        _activities = List<Map<String, dynamic>>.from(data);
+        _announcements = List<Map<String, dynamic>>.from(announcementData);
+      });
+
+      // Sync grading state for activities
+      for (var activity in _activities) {
+        _initNewActivityForAllStudents(activity);
+      }
+    } catch (e) {
+      debugPrint("Error loading data: $e");
+    }
   }
 
   // ================= ANNOUNCEMENT MODAL LOGIC =================
@@ -536,9 +578,11 @@ class _TeacherPageState extends State<TeacherPage> {
               width: double.infinity,
               height: 50,
               child: ElevatedButton(
-                onPressed: () {
-                  if (_announcementTitleController.text.isEmpty ||
-                      _announcementMessageController.text.isEmpty) {
+                onPressed: () async { // 1. Add async here
+                  String title = _announcementTitleController.text.trim();
+                  String message = _announcementMessageController.text.trim();
+
+                  if (title.isEmpty || message.isEmpty) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('Please fill in all fields'),
@@ -547,25 +591,40 @@ class _TeacherPageState extends State<TeacherPage> {
                     return;
                   }
 
-                  // Create new announcement
+                  // 2. Prepare the data map for SQLite
                   final newAnnouncement = {
-                    'title': _announcementTitleController.text,
-                    'message': _announcementMessageController.text,
+                    'title': title,
+                    'message': message,
                     'date': _getCurrentDate(),
                   };
 
-                  setState(() {
-                    _announcements.insert(0, newAnnouncement);
-                  });
+                  try {
+                    // 3. Save to the database
+                    await ActivityDatabase.instance.insertAnnouncement(newAnnouncement);
 
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Announcement posted successfully!'),
-                    ),
-                  );
-                  _announcementTitleController.clear();
-                  _announcementMessageController.clear();
+                    // 4. Update the UI list
+                    setState(() {
+                      _announcements.insert(0, newAnnouncement);
+                    });
+
+                    if (mounted) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Announcement posted successfully!'),
+                        ),
+                      );
+
+                      // 5. Clear the controllers
+                      _announcementTitleController.clear();
+                      _announcementMessageController.clear();
+                    }
+                  } catch (e) {
+                    // Handle database errors
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Database Error: $e')),
+                    );
+                  }
                 },
                 child: const Text('Post Announcement'),
               ),
@@ -576,6 +635,8 @@ class _TeacherPageState extends State<TeacherPage> {
       ),
     );
   }
+
+
 
   // ================= SECTION SWITCHER =================
   Widget _buildSection() {

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:project/database/admin_db.dart';
 
 class AdminPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -18,25 +20,42 @@ class _AdminPageState extends State<AdminPage> {
   int selectedIndex = 0;
   bool isSidebarOpen = false;
 
-  final List<String> menuTitles = [
-    'Dashboard',
-    'Students',
-    'Teachers',
-    'Guardians',
-  ];
+  List<Map<String, dynamic>> _students = [];
+  List<Map<String, dynamic>> _archivedStudents = [];
+  final List<Map<String, String>> _teachers = [];
+  final List<Map<String, String>> _guardians = [];
 
+  final List<String> menuTitles = ['Dashboard', 'Students', 'Teachers', 'Guardians', 'Archives'];
   final List<IconData> menuIcons = [
     Icons.dashboard_rounded,
     Icons.school_rounded,
     Icons.person_4_rounded,
     Icons.family_restroom_rounded,
+    Icons.archive_rounded,
   ];
 
-  // Admin profile data
-  Map<String, dynamic> adminProfile = {
-    'name': 'Admin User',
-    'adminId': 'ADMIN-001',
-  };
+  @override
+  void initState() {
+    super.initState();
+    _refreshStudents();
+  }
+
+  Future<void> _refreshStudents() async {
+    final activeData = await AdminDatabase.instance.readActiveStudents();
+    final archivedData = await AdminDatabase.instance.readArchivedStudents();
+    setState(() {
+      _students = activeData;
+      _archivedStudents = archivedData;
+    });
+  }
+
+  List<dynamic> _getCurrentList() {
+    if (selectedIndex == 1) return _students;
+    if (selectedIndex == 2) return _teachers;
+    if (selectedIndex == 3) return _guardians;
+    if (selectedIndex == 4) return _archivedStudents;
+    return [];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,13 +64,10 @@ class _AdminPageState extends State<AdminPage> {
       body: SafeArea(
         child: Stack(
           children: [
-            // ================= MAIN CONTENT =================
             Container(
               color: widget.isDarkMode ? Colors.grey[900] : Colors.white,
               child: _buildSection(),
             ),
-
-            // ================= OVERLAY SIDEBAR =================
             if (isSidebarOpen)
               Positioned.fill(
                 child: GestureDetector(
@@ -59,116 +75,14 @@ class _AdminPageState extends State<AdminPage> {
                   child: Container(color: Colors.black26),
                 ),
               ),
-
-            // ================= SIDEBAR DRAWER =================
             AnimatedPositioned(
               duration: const Duration(milliseconds: 300),
               left: isSidebarOpen ? 0 : -260,
               top: 0,
               bottom: 0,
               width: 260,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: widget.isDarkMode ? Colors.grey[900] : Colors.white,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      blurRadius: 10,
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    const SizedBox(height: 12),
-                    // HAMBURGER MENU ICON
-                    SizedBox(
-                      width: double.infinity,
-                      height: 50,
-                      child: Center(
-                        child: IconButton(
-                          icon: const Icon(Icons.menu),
-                          onPressed: () => setState(() => isSidebarOpen = !isSidebarOpen),
-                        ),
-                      ),
-                    ),
-
-                    // PROFILE SECTION
-                    const SizedBox(height: 20),
-                    const CircleAvatar(
-                      radius: 40,
-                      backgroundColor: Colors.blue,
-                      child: Icon(Icons.admin_panel_settings, size: 40, color: Colors.white),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      adminProfile['name'],
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
-                    Text(
-                      "Admin ID: ${adminProfile['adminId']}",
-                      style: TextStyle(color: Colors.grey, fontSize: 12),
-                    ),
-                    const SizedBox(height: 30),
-
-                    // NAVIGATION MENU
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: menuTitles.length,
-                        itemBuilder: (context, index) {
-                          final selected = index == selectedIndex;
-                          return ListTile(
-                            leading: Icon(menuIcons[index], color: selected ? Colors.blue : null),
-                            title: Text(menuTitles[index],
-                                style: TextStyle(
-                                  fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-                                  color: selected ? Colors.blue : null,
-                                )),
-                            selected: selected,
-                            selectedTileColor: Colors.blue.withOpacity(0.05),
-                            onTap: () {
-                              setState(() {
-                                selectedIndex = index;
-                                isSidebarOpen = false;
-                              });
-                            },
-                          );
-                        },
-                      ),
-                    ),
-
-                    // BOTTOM SECTION: THEME & LOGOUT
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.blue.withOpacity(0.05),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: ListTile(
-                          title: const Text("Dark Mode"),
-                          trailing: Switch(
-                            value: widget.isDarkMode,
-                            onChanged: (_) => widget.toggleTheme(),
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    ListTile(
-                      leading: const Icon(Icons.logout, color: Colors.redAccent),
-                      title: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
-                      onTap: () {
-                        setState(() => isSidebarOpen = false);
-                        Navigator.pushReplacementNamed(context, '/login');
-                      },
-                    ),
-                    const SizedBox(height: 20),
-                  ],
-                ),
-              ),
+              child: _buildSidebar(),
             ),
-
-            // ================= HAMBURGER MENU BUTTON (Floating) =================
             if (!isSidebarOpen)
               Positioned(
                 top: 16,
@@ -184,172 +98,304 @@ class _AdminPageState extends State<AdminPage> {
     );
   }
 
-  Widget _buildSection() {
-    switch (selectedIndex) {
-      case 0: return _dashboardOverview();
-      case 1: return _userListSection("Student List", ["Name", "LRN", "Grade", "Status"]);
-      case 2: return _userListSection("Teacher List", ["Name", "ID", "Email", "Status"]);
-      case 3: return _userListSection("Guardian List", ["Name", "Email", "Role", "Status"]);
-      default: return Container();
-    }
-  }
-
-  // ================= 1. DASHBOARD OVERVIEW =================
-  Widget _dashboardOverview() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Header row aligned with the floating hamburger (placed at top: 16, left: 16)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 24, 20),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: const [
-              // Reserve horizontal space for the floating hamburger button
-              SizedBox(width: 48),
-
-              // Small gap between the hamburger area and the title
-              SizedBox(width: 8),
-
-              Text(
-                'Dashboard Overview',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              children: [
-                GridView.count(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: MediaQuery.of(context).size.width > 900 ? 4 : 2,
-                  mainAxisSpacing: 16,
-                  crossAxisSpacing: 16,
-                  childAspectRatio: 1.5,
-                  children: [
-                    _statCard("Students", "Active: 45", "Inactive: 2", Colors.green),
-                    _statCard("Teachers", "Active: 12", "Inactive: 1", Colors.blue),
-                    _statCard("Guardians", "Active: 40", "Inactive: 0", Colors.teal),
-                    _statCard("Total Users", "99", "System Accounts", Colors.purple),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                // Placeholder for Chart
-                Container(
-                  height: 300,
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: widget.isDarkMode ? Colors.grey[800] : Colors.grey[100],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Center(child: Text("System User Types Chart Placeholder")),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _statCard(String title, String main, String sub, Color color) {
+  Widget _buildSidebar() {
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: widget.isDarkMode ? Colors.grey[800] : Colors.grey[100],
-        borderRadius: BorderRadius.circular(12),
-        border: Border(left: BorderSide(color: color, width: 4)),
+        color: widget.isDarkMode ? Colors.grey[900] : Colors.white,
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10)],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Text(main, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
-          Text(sub, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          const SizedBox(height: 50),
+          const CircleAvatar(
+            radius: 40,
+            backgroundColor: Colors.blue,
+            child: Icon(Icons.admin_panel_settings, size: 40, color: Colors.white),
+          ),
+          const SizedBox(height: 30),
+          Expanded(
+            child: ListView.builder(
+              itemCount: menuTitles.length,
+              itemBuilder: (context, index) {
+                final selected = index == selectedIndex;
+                return ListTile(
+                  leading: Icon(menuIcons[index], color: selected ? Colors.blue : null),
+                  title: Text(menuTitles[index], style: TextStyle(color: selected ? Colors.blue : null)),
+                  onTap: () {
+                    setState(() {
+                      selectedIndex = index;
+                      isSidebarOpen = false;
+                    });
+                  },
+                );
+              },
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.redAccent),
+            title: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
+            onTap: () => Navigator.pop(context),
+          ),
+          const SizedBox(height: 20),
         ],
       ),
     );
   }
 
-  // ================= 2. USER LISTS (Reusable Table) =================
-  Widget _userListSection(String title, List<String> headers) {
+  Widget _buildSection() {
+    switch (selectedIndex) {
+      case 0: return _dashboardOverview();
+      default: return _userListSection(menuTitles[selectedIndex]);
+    }
+  }
+
+  Widget _dashboardOverview() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Increased left padding so the title clears the floating hamburger/menu area.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(72, 22, 24, 20),
-          child: Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(72, 22, 24, 20),
+          child: Text('Dashboard Overview', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
         ),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 72),
+          padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Row(
             children: [
-              ElevatedButton.icon(
-                onPressed: () {},
-                icon: const Icon(Icons.add),
-                label: const Text("Add New"),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-              ),
-              const Spacer(),
-              SizedBox(
-                width: 200,
-                child: TextField(
-                  decoration: InputDecoration(
-                    hintText: "Search...",
-                    prefixIcon: const Icon(Icons.search, size: 20),
-                    isDense: true,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                ),
-              ),
+              _modernStatCard("Students", _students.length.toString(), Icons.school, Colors.blue),
+              _modernStatCard("Archived", _archivedStudents.length.toString(), Icons.archive, Colors.orange),
             ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        Expanded(
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 72),
-              child: DataTable(
-                columns: headers.map((h) => DataColumn(label: Text(h))).toList()
-                  ..add(const DataColumn(label: Text("Actions"))),
-                rows: List.generate(10, (index) => DataRow(cells: [
-                  ...headers.map((_) => const DataCell(Text("Sample Data"))),
-                  DataCell(Row(
-                    children: [
-                      IconButton(icon: const Icon(Icons.edit, size: 20, color: Colors.blue), onPressed: () {}),
-                      IconButton(icon: const Icon(Icons.delete, size: 20, color: Colors.red), onPressed: () {}),
-                    ],
-                  )),
-                ])),
-              ),
-            ),
           ),
         ),
       ],
     );
   }
 
-  // Reusable Frame for Layout Consistency - Updated padding to clear hamburger area
-  Widget _pageFrame(String title, Widget content) {
+  Widget _modernStatCard(String title, String count, IconData icon, Color color) {
+    return Container(
+      width: 150,
+      margin: const EdgeInsets.only(right: 12),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 24),
+          const SizedBox(height: 12),
+          Text(count, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+          Text(title, style: TextStyle(color: color.withOpacity(0.8), fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
+  Widget _userListSection(String title) {
+    List<dynamic> currentList = _getCurrentList();
+    bool isStudent = title == 'Students';
+    bool isArchive = title == 'Archives';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Increased left padding so the title clears the floating hamburger/menu area.
         Padding(
           padding: const EdgeInsets.fromLTRB(72, 22, 24, 20),
           child: Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
         ),
-        Expanded(child: content),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  decoration: InputDecoration(
+                    hintText: "Search $title...",
+                    prefixIcon: const Icon(Icons.search),
+                    filled: true,
+                    fillColor: widget.isDarkMode ? Colors.grey[800] : Colors.grey[100],
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              ),
+              if (isStudent) ...[
+                const SizedBox(width: 12),
+                ElevatedButton(
+                  onPressed: () => _showAddStudentModal(),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                  child: const Icon(Icons.add, color: Colors.white),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Expanded(
+          child: currentList.isEmpty
+              ? const Center(child: Text("No entries found."))
+              : ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            itemCount: currentList.length,
+            itemBuilder: (context, index) {
+              final user = currentList[index];
+              bool isStudentData = user.containsKey('lrn');
+              String displayName = isStudentData ? "${user['firstName']} ${user['lastName']}" : user['name'] ?? "";
+
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                child: ListTile(
+                  leading: CircleAvatar(child: Text(displayName.isNotEmpty ? displayName[0] : "?")),
+                  title: Text(displayName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text(isStudentData ? "LRN: ${user['lrn']} • ${user['grade']}" : "Active"),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isStudent) ...[
+                        IconButton(
+                          icon: const Icon(Icons.edit, color: Colors.blue),
+                          onPressed: () => _showEditStudentModal(user),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.archive, color: Colors.orange),
+                          onPressed: () async {
+                            await AdminDatabase.instance.archiveStudent(user['id']);
+                            _refreshStudents();
+                          },
+                        ),
+                      ],
+                      if (isArchive) ...[
+                        IconButton(
+                          icon: const Icon(Icons.unarchive, color: Colors.green),
+                          onPressed: () async {
+                            await AdminDatabase.instance.restoreStudent(user['id']);
+                            _refreshStudents();
+                          },
+                        ),
+                      ],
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                        onPressed: () async {
+                          if (isStudentData) {
+                            await AdminDatabase.instance.deleteStudent(user['id']);
+                            _refreshStudents();
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
       ],
+    );
+  }
+
+  void _showAddStudentModal() {
+    final TextEditingController fName = TextEditingController();
+    final TextEditingController mName = TextEditingController();
+    final TextEditingController lName = TextEditingController();
+    final TextEditingController lrn = TextEditingController();
+    String? selectedGrade;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text("Add New Student"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: fName, decoration: const InputDecoration(labelText: "First Name")),
+                TextField(controller: mName, decoration: const InputDecoration(labelText: "Middle Name (Optional)")),
+                TextField(controller: lName, decoration: const InputDecoration(labelText: "Last Name")),
+                TextField(controller: lrn, decoration: const InputDecoration(labelText: "LRN (12 digits)"), keyboardType: TextInputType.number),
+                const SizedBox(height: 15),
+                DropdownButtonFormField<String>(
+                  value: selectedGrade,
+                  items: ['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6'].map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
+                  onChanged: (val) => setDialogState(() => selectedGrade = val),
+                  decoration: const InputDecoration(labelText: "Grade Level"),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+            ElevatedButton(
+              onPressed: () async {
+                if (fName.text.isNotEmpty && lName.text.isNotEmpty && lrn.text.length == 12 && selectedGrade != null) {
+                  await AdminDatabase.instance.createStudent({
+                    'firstName': fName.text.trim(),
+                    'middleName': mName.text.trim(),
+                    'lastName': lName.text.trim(),
+                    'lrn': lrn.text,
+                    'grade': selectedGrade!,
+                  });
+                  _refreshStudents();
+                  Navigator.pop(context);
+                }
+              },
+              child: const Text("Save"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEditStudentModal(Map<String, dynamic> student) {
+    final fName = TextEditingController(text: student['firstName']);
+    final mName = TextEditingController(text: student['middleName']);
+    final lName = TextEditingController(text: student['lastName']);
+    final lrn = TextEditingController(text: student['lrn']);
+    String? selectedGrade = student['grade'];
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text("Edit Student"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: fName, decoration: const InputDecoration(labelText: "First Name")),
+                TextField(controller: mName, decoration: const InputDecoration(labelText: "Middle Name (Optional)")),
+                TextField(controller: lName, decoration: const InputDecoration(labelText: "Last Name")),
+                TextField(controller: lrn, decoration: const InputDecoration(labelText: "LRN"), keyboardType: TextInputType.number),
+                DropdownButtonFormField<String>(
+                  value: selectedGrade,
+                  items: ['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6'].map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
+                  onChanged: (val) => setDialogState(() => selectedGrade = val),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+            ElevatedButton(
+              onPressed: () async {
+                await AdminDatabase.instance.updateStudent(student['id'], {
+                  'firstName': fName.text.trim(),
+                  'middleName': mName.text.trim(),
+                  'lastName': lName.text.trim(),
+                  'lrn': lrn.text,
+                  'grade': selectedGrade!,
+                });
+                _refreshStudents();
+                Navigator.pop(context);
+              },
+              child: const Text("Update"),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

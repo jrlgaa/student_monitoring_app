@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:project/database/admin_db.dart'; // Ensure this points to your updated helper
+import 'package:project/database/admin_db.dart';
 
 class AdminPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -21,7 +21,7 @@ class _AdminPageState extends State<AdminPage> {
   bool isSidebarOpen = false;
 
   List<Map<String, dynamic>> _students = [];
-  List<Map<String, dynamic>> _allArchivedItems = []; // Combined list for Archives
+  List<Map<String, dynamic>> _allArchivedItems = [];
   List<Map<String, dynamic>> _teachers = [];
   List<Map<String, dynamic>> _guardians = [];
 
@@ -41,22 +41,20 @@ class _AdminPageState extends State<AdminPage> {
   }
 
   Future<void> _refreshData() async {
-    // Fetch active and archived students
     final activeData = await DatabaseHelper.instance.readActiveStudents();
     final archivedStudents = await DatabaseHelper.instance.readArchivedStudents();
-
-    // Fetch active and archived teachers/guardians
     final teacherData = await DatabaseHelper.instance.readUsersByRole('Teacher');
     final guardianData = await DatabaseHelper.instance.readUsersByRole('Guardian');
     final archivedUsers = await DatabaseHelper.instance.readArchivedUsers();
 
-    setState(() {
-      _students = activeData;
-      _teachers = teacherData;
-      _guardians = guardianData;
-      // Merge archived students and staff into one list for the Archives tab
-      _allArchivedItems = [...archivedStudents, ...archivedUsers];
-    });
+    if (mounted) {
+      setState(() {
+        _students = activeData;
+        _teachers = teacherData;
+        _guardians = guardianData;
+        _allArchivedItems = [...archivedStudents, ...archivedUsers];
+      });
+    }
   }
 
   List<dynamic> _getCurrentList() {
@@ -65,6 +63,52 @@ class _AdminPageState extends State<AdminPage> {
     if (selectedIndex == 3) return _guardians;
     if (selectedIndex == 4) return _allArchivedItems;
     return [];
+  }
+
+  void _handleLogout() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Confirm Logout"),
+        content: const Text("Are you sure you want to sign out?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () {
+              Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+            },
+            child: const Text("Logout", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeletion(Map<String, dynamic> user, bool isStudent) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Delete Permanently?"),
+        content: Text("Delete ${user['firstName']} ${user['lastName']}? This action is irreversible."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              if (isStudent) {
+                await DatabaseHelper.instance.deleteStudent(user['id']);
+              } else {
+                await DatabaseHelper.instance.deleteUser(user['id']);
+              }
+              _refreshData();
+              if (mounted) Navigator.pop(context);
+            },
+            child: const Text("Delete", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -123,8 +167,11 @@ class _AdminPageState extends State<AdminPage> {
             child: Icon(Icons.admin_panel_settings, size: 40, color: Colors.white),
           ),
           const SizedBox(height: 30),
+
+          // Main Menu Items
           Expanded(
             child: ListView.builder(
+              padding: EdgeInsets.zero,
               itemCount: menuTitles.length,
               itemBuilder: (context, index) {
                 final selected = index == selectedIndex;
@@ -141,10 +188,29 @@ class _AdminPageState extends State<AdminPage> {
               },
             ),
           ),
+
+          const Divider(),
+
+          // --- DARK MODE TOGGLE (ABOVE LOGOUT) ---
+          ListTile(
+            leading: Icon(
+              widget.isDarkMode ? Icons.light_mode : Icons.dark_mode,
+              color: widget.isDarkMode ? Colors.amber : Colors.blueGrey,
+            ),
+            title: Text(widget.isDarkMode ? 'Light Mode' : 'Dark Mode'),
+            trailing: Switch(
+              value: widget.isDarkMode,
+              activeColor: Colors.amber,
+              onChanged: (val) => widget.toggleTheme(),
+            ),
+            onTap: widget.toggleTheme,
+          ),
+
+          // --- LOGOUT BUTTON (AT BOTTOM) ---
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.redAccent),
             title: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
-            onTap: () => Navigator.pop(context),
+            onTap: _handleLogout,
           ),
           const SizedBox(height: 20),
         ],
@@ -208,6 +274,8 @@ class _AdminPageState extends State<AdminPage> {
   Widget _userListSection(String title) {
     List<dynamic> currentList = _getCurrentList();
     bool isStudentTab = title == 'Students';
+    bool isTeacherTab = title == 'Teachers';
+    bool isGuardianTab = title == 'Guardians';
     bool isArchiveTab = title == 'Archives';
 
     return Column(
@@ -229,7 +297,6 @@ class _AdminPageState extends State<AdminPage> {
                     filled: true,
                     fillColor: widget.isDarkMode ? Colors.grey[800] : Colors.grey[100],
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                    contentPadding: EdgeInsets.zero,
                   ),
                 ),
               ),
@@ -237,7 +304,7 @@ class _AdminPageState extends State<AdminPage> {
                 const SizedBox(width: 12),
                 ElevatedButton(
                   onPressed: () => _showAddStudentModal(),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
                   child: const Icon(Icons.add, color: Colors.white),
                 ),
               ],
@@ -246,9 +313,7 @@ class _AdminPageState extends State<AdminPage> {
         ),
         const SizedBox(height: 16),
         Expanded(
-          child: currentList.isEmpty
-              ? const Center(child: Text("No entries found."))
-              : ListView.builder(
+          child: ListView.builder(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             itemCount: currentList.length,
             itemBuilder: (context, index) {
@@ -258,49 +323,41 @@ class _AdminPageState extends State<AdminPage> {
 
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                 child: ListTile(
                   leading: CircleAvatar(
                     backgroundColor: isStudentData ? Colors.blue : Colors.green,
-                    child: Text(displayName.isNotEmpty ? displayName[0] : "?", style: const TextStyle(color: Colors.white)),
+                    child: Text(displayName.isNotEmpty ? displayName[0] : "?"),
                   ),
                   title: Text(displayName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text(isStudentData
-                      ? "LRN: ${user['lrn']} • ${user['grade']}"
-                      : "${user['role']} • ${user['email']}"),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (isStudentTab)
+                      if (isStudentTab || isTeacherTab || isGuardianTab)
                         IconButton(
                           icon: const Icon(Icons.edit, color: Colors.blue),
-                          onPressed: () => _showEditStudentModal(user),
+                          onPressed: () => isStudentTab ? _showEditStudentModal(user) : _showEditUserModal(user),
                         ),
-                      if (isArchiveTab)
+                      if (isArchiveTab) ...[
                         IconButton(
                           icon: const Icon(Icons.unarchive, color: Colors.green),
                           onPressed: () async {
-                            // Logic to restore correctly based on data type
-                            if (isStudentData) {
-                              await DatabaseHelper.instance.restoreStudent(user['id']);
-                            } else {
-                              await DatabaseHelper.instance.restoreUser(user['id']);
-                            }
-                            _refreshData();
-                          },
-                        )
-                      else
-                        IconButton(
-                          icon: const Icon(Icons.archive, color: Colors.orange),
-                          onPressed: () async {
-                            if (isStudentData) {
-                              await DatabaseHelper.instance.archiveStudent(user['id']);
-                            } else {
-                              await DatabaseHelper.instance.archiveUser(user['id']);
-                            }
+                            isStudentData ? await DatabaseHelper.instance.restoreStudent(user['id']) : await DatabaseHelper.instance.restoreUser(user['id']);
                             _refreshData();
                           },
                         ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
+                          onPressed: () => _confirmDeletion(user, isStudentData),
+                        ),
+                      ] else ...[
+                        IconButton(
+                          icon: const Icon(Icons.archive, color: Colors.orange),
+                          onPressed: () async {
+                            isStudentData ? await DatabaseHelper.instance.archiveStudent(user['id']) : await DatabaseHelper.instance.archiveUser(user['id']);
+                            _refreshData();
+                          },
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -313,10 +370,9 @@ class _AdminPageState extends State<AdminPage> {
   }
 
   void _showAddStudentModal() {
-    final TextEditingController fName = TextEditingController();
-    final TextEditingController mName = TextEditingController();
-    final TextEditingController lName = TextEditingController();
-    final TextEditingController lrn = TextEditingController();
+    final fName = TextEditingController();
+    final lName = TextEditingController();
+    final lrn = TextEditingController();
     String? selectedGrade;
 
     showDialog(
@@ -324,51 +380,33 @@ class _AdminPageState extends State<AdminPage> {
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: const Text("Add New Student"),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(controller: fName, decoration: const InputDecoration(labelText: "First Name")),
-                TextField(controller: mName, decoration: const InputDecoration(labelText: "Middle Name (Optional)")),
-                TextField(controller: lName, decoration: const InputDecoration(labelText: "Last Name")),
-                TextField(
-                  controller: lrn,
-                  decoration: const InputDecoration(labelText: "LRN (12 digits)"),
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(12)],
-                ),
-                const SizedBox(height: 15),
-                DropdownButtonFormField<String>(
-                  value: selectedGrade,
-                  items: ['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6']
-                      .map((g) => DropdownMenuItem(value: g, child: Text(g)))
-                      .toList(),
-                  onChanged: (val) => setDialogState(() => selectedGrade = val),
-                  decoration: const InputDecoration(labelText: "Grade Level"),
-                ),
-              ],
-            ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: fName, decoration: const InputDecoration(labelText: "First Name")),
+              TextField(controller: lName, decoration: const InputDecoration(labelText: "Last Name")),
+              TextField(controller: lrn, decoration: const InputDecoration(labelText: "LRN")),
+              DropdownButtonFormField<String>(
+                value: selectedGrade,
+                items: ['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6']
+                    .map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
+                onChanged: (val) => setDialogState(() => selectedGrade = val),
+              ),
+            ],
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
             ElevatedButton(
               onPressed: () async {
-                if (fName.text.isNotEmpty && lName.text.isNotEmpty && lrn.text.length == 12 && selectedGrade != null) {
-                  await DatabaseHelper.instance.createStudent({
-                    'firstName': fName.text.trim(),
-                    'middleName': mName.text.trim(),
-                    'lastName': lName.text.trim(),
-                    'lrn': lrn.text,
-                    'grade': selectedGrade!,
-                    'status': 'Active',
-                  });
-                  _refreshData();
-                  Navigator.pop(context);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Please fill all fields correctly (LRN must be 12 digits)")),
-                  );
-                }
+                await DatabaseHelper.instance.createStudent({
+                  'firstName': fName.text.trim(),
+                  'lastName': lName.text.trim(),
+                  'lrn': lrn.text.trim(),
+                  'grade': selectedGrade!,
+                  'status': 'Active',
+                });
+                _refreshData();
+                Navigator.pop(context);
               },
               child: const Text("Save"),
             ),
@@ -380,7 +418,6 @@ class _AdminPageState extends State<AdminPage> {
 
   void _showEditStudentModal(Map<String, dynamic> student) {
     final fName = TextEditingController(text: student['firstName']);
-    final mName = TextEditingController(text: student['middleName']);
     final lName = TextEditingController(text: student['lastName']);
     final lrn = TextEditingController(text: student['lrn']);
     String? selectedGrade = student['grade'];
@@ -390,28 +427,19 @@ class _AdminPageState extends State<AdminPage> {
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: const Text("Edit Student"),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(controller: fName, decoration: const InputDecoration(labelText: "First Name")),
-                TextField(controller: mName, decoration: const InputDecoration(labelText: "Middle Name (Optional)")),
-                TextField(controller: lName, decoration: const InputDecoration(labelText: "Last Name")),
-                TextField(
-                  controller: lrn,
-                  decoration: const InputDecoration(labelText: "LRN"),
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(12)],
-                ),
-                DropdownButtonFormField<String>(
-                  value: selectedGrade,
-                  items: ['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6']
-                      .map((g) => DropdownMenuItem(value: g, child: Text(g)))
-                      .toList(),
-                  onChanged: (val) => setDialogState(() => selectedGrade = val),
-                ),
-              ],
-            ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: fName, decoration: const InputDecoration(labelText: "First Name")),
+              TextField(controller: lName, decoration: const InputDecoration(labelText: "Last Name")),
+              TextField(controller: lrn, decoration: const InputDecoration(labelText: "LRN")),
+              DropdownButtonFormField<String>(
+                value: selectedGrade,
+                items: ['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6']
+                    .map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
+                onChanged: (val) => setDialogState(() => selectedGrade = val),
+              ),
+            ],
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
@@ -419,9 +447,8 @@ class _AdminPageState extends State<AdminPage> {
               onPressed: () async {
                 await DatabaseHelper.instance.updateStudent(student['id'], {
                   'firstName': fName.text.trim(),
-                  'middleName': mName.text.trim(),
                   'lastName': lName.text.trim(),
-                  'lrn': lrn.text,
+                  'lrn': lrn.text.trim(),
                   'grade': selectedGrade!,
                 });
                 _refreshData();
@@ -431,6 +458,42 @@ class _AdminPageState extends State<AdminPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showEditUserModal(Map<String, dynamic> user) {
+    final fName = TextEditingController(text: user['firstName']);
+    final lName = TextEditingController(text: user['lastName']);
+    final email = TextEditingController(text: user['email']);
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Edit ${user['role']}"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: fName, decoration: const InputDecoration(labelText: "First Name")),
+            TextField(controller: lName, decoration: const InputDecoration(labelText: "Last Name")),
+            TextField(controller: email, decoration: const InputDecoration(labelText: "Email")),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () async {
+              await DatabaseHelper.instance.updateUser(user['id'], {
+                'firstName': fName.text.trim(),
+                'lastName': lName.text.trim(),
+                'email': email.text.trim(),
+              });
+              _refreshData();
+              Navigator.pop(context);
+            },
+            child: const Text("Update"),
+          ),
+        ],
       ),
     );
   }

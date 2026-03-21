@@ -1,11 +1,34 @@
-# Task: Clean up Student Grades section in teacher_page.dart
+# Forgot Password Feature Implementation TODO
 
-## Steps:
-- [x] Step 1: Remove hardcoded dummy activities from _initGradingState()
-- [x] Step 2: Update empty state message in _studentsSection() for clarity
-- [x] Step 3: Verify activity sync logic remains intact
-- [x] Step 4: Test the changes
-## Task Complete ✅
+## Status: In Progress
 
-All steps finished. Student grades now only show teacher-posted activities, no dummy data. Empty state updated.
+### Step 1: [DONE] Create new lib/auth/forgot_password_page.dart
+- Stateful widget w/ theme props
+- Email verification phase
+- Password reset phase
+- DB logic extraction
 
+### Step 2: [DONE] Update lib/auth/login_page.dart
+- Remove inline forgot password logic
+- Add Navigator.push to new page
+- Clean up removed UI/state
+
+### Step 3: [DONE] Update lib/main.dart
+- Add /forgot-password route
+
+### Step 4: [PENDING] Test & Verify
+- flutter pub get (if needed)
+- flutter run
+- Test full flow: nav → email verify → reset → back to login → login w/ new pass
+
+Completed steps will be marked [DONE]
+
+### Step 3: [PENDING] Update lib/main.dart
+- Add /forgot-password route
+
+### Step 4: [PENDING] Test & Verify
+- flutter pub get (if needed)
+- flutter run
+- Test full flow: nav → email verify → reset → back to login → login w/ new pass
+
+Completed steps will be marked [DONE]

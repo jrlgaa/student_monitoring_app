@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart' as p; // FIX: Added 'as p' to avoid Context conflicts
+import 'package:path/path.dart' as p;
+import 'forgot_password_page.dart';
 
 class LoginPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -81,6 +82,8 @@ class _LoginPageState extends State<LoginPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -170,6 +173,26 @@ class _LoginPageState extends State<LoginPage> {
                     child: _isLoading
                         ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : const Text('Sign in', style: TextStyle(fontSize: 16)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                GestureDetector(
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ForgotPasswordPage(
+                        toggleTheme: widget.toggleTheme,
+                        isDarkMode: widget.isDarkMode,
+                      ),
+                    ),
+                  ),
+                  child: Text(
+                    'Forgot Password?',
+                    style: TextStyle(
+                      color: Colors.blue,
+                      fontWeight: FontWeight.bold,
+                      decoration: TextDecoration.underline,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 24),

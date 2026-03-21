@@ -20,7 +20,6 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
   int selectedIndex = 0;
   bool isSidebarOpen = false;
 
-  // Animation Controllers
   late AnimationController _dashboardController;
   late AnimationController _listController;
 
@@ -101,6 +100,36 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
     );
   }
 
+  // --- DELETE CONFIRMATION DIALOG ---
+  void _showDeleteConfirmation(Map<String, dynamic> item, bool isStudent) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Permanent Delete"),
+        content: Text("Are you sure you want to permanently delete ${item['firstName']} ${item['lastName']}? This action cannot be undone."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              if (isStudent) {
+                await DatabaseHelper.instance.deleteStudent(item['id']);
+              } else {
+                await DatabaseHelper.instance.deleteUser(item['id']);
+              }
+              Navigator.pop(context);
+              _refreshData();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text("Item permanently deleted"), backgroundColor: Colors.red),
+              );
+            },
+            child: const Text("Delete", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   List<dynamic> _getCurrentList() {
     if (selectedIndex == 1) return _students;
     if (selectedIndex == 2) return _teachers;
@@ -111,23 +140,18 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    // Key Fix: The Scaffold background must match the theme color
-    // so there is no flicker when the sidebar slides.
     final bgColor = widget.isDarkMode ? Colors.grey[900]! : Colors.white;
 
     return Scaffold(
       backgroundColor: bgColor,
-      extendBody: true, // Key Fix: Let body extend behind navigation bars
+      extendBody: true,
       resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
-          // MAIN CONTENT AREA
           SafeArea(
             bottom: false,
             child: _buildSection(),
           ),
-
-          // OVERLAY
           if (isSidebarOpen)
             Positioned.fill(
               child: GestureDetector(
@@ -135,8 +159,6 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
                 child: Container(color: Colors.black45),
               ),
             ),
-
-          // SIDEBAR (Pins top 0 to bottom 0 of the actual screen)
           AnimatedPositioned(
             duration: const Duration(milliseconds: 300),
             left: isSidebarOpen ? 0 : -280,
@@ -145,8 +167,6 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
             width: 280,
             child: _buildSidebar(),
           ),
-
-          // MENU BUTTON
           if (!isSidebarOpen)
             SafeArea(
               child: Padding(
@@ -164,8 +184,6 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
 
   Widget _buildSidebar() {
     return Container(
-      // CRITICAL FIX: The background decoration is here at the top level
-      // of the sidebar, so it covers 100% height from top 0 to bottom 0.
       decoration: BoxDecoration(
         color: widget.isDarkMode ? Colors.grey[900] : Colors.white,
         boxShadow: [
@@ -174,7 +192,6 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
       ),
       child: Column(
         children: [
-          // Header inside its own SafeArea
           SafeArea(
             bottom: false,
             child: Column(
@@ -189,11 +206,9 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
               ],
             ),
           ),
-
-          // Menu Items
           Expanded(
             child: ListView.builder(
-              padding: EdgeInsets.zero, // Important: Removes default top/bottom gaps in lists
+              padding: EdgeInsets.zero,
               itemCount: menuTitles.length,
               itemBuilder: (context, index) {
                 final selected = index == selectedIndex;
@@ -218,10 +233,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
               },
             ),
           ),
-
           const Divider(height: 1),
-
-          // Settings and Logout (Do NOT wrap this in a SafeArea)
           ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 24),
             leading: Icon(
@@ -242,9 +254,6 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
             title: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
             onTap: _handleLogout,
           ),
-
-          // Manual Padding for system navigation bars (the gap for the back button)
-          // The background Container WILL stay under it.
           SizedBox(height: MediaQuery.of(context).padding.bottom + 15),
         ],
       ),
@@ -258,7 +267,6 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
     }
   }
 
-  // --- ANIMATED DASHBOARD OVERVIEW ---
   Widget _dashboardOverview() {
     return SingleChildScrollView(
       child: Column(
@@ -358,7 +366,6 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
     );
   }
 
-  // --- ANIMATED USER LIST ---
   Widget _userListSection(String title) {
     List<dynamic> currentList = _getCurrentList();
     bool isStudentTab = title == 'Students';
@@ -436,22 +443,39 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Show Edit only if NOT in Archives
               if (selectedIndex != 4)
                 IconButton(
                   icon: const Icon(Icons.edit, color: Colors.blue),
                   onPressed: () => isStudentData ? _showEditStudentModal(user) : _showEditUserModal(user),
                 ),
-              IconButton(
-                icon: Icon(selectedIndex == 4 ? Icons.unarchive : Icons.archive, color: Colors.orange),
-                onPressed: () async {
-                  if (selectedIndex == 4) {
+
+              // Restore button (only in Archives)
+              if (selectedIndex == 4)
+                IconButton(
+                  icon: const Icon(Icons.unarchive, color: Colors.green),
+                  onPressed: () async {
                     isStudentData ? await DatabaseHelper.instance.restoreStudent(user['id']) : await DatabaseHelper.instance.restoreUser(user['id']);
-                  } else {
+                    _refreshData();
+                  },
+                ),
+
+              // Archive button (only if NOT in Archives)
+              if (selectedIndex != 4)
+                IconButton(
+                  icon: const Icon(Icons.archive, color: Colors.orange),
+                  onPressed: () async {
                     isStudentData ? await DatabaseHelper.instance.archiveStudent(user['id']) : await DatabaseHelper.instance.archiveUser(user['id']);
-                  }
-                  _refreshData();
-                },
-              ),
+                    _refreshData();
+                  },
+                ),
+
+              // PERMANENT DELETE BUTTON (Only in Archives)
+              if (selectedIndex == 4)
+                IconButton(
+                  icon: const Icon(Icons.delete_forever, color: Colors.red),
+                  onPressed: () => _showDeleteConfirmation(user, isStudentData),
+                ),
             ],
           ),
         ),
@@ -459,7 +483,6 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
     );
   }
 
-  // --- MODALS (Unchanged for logic, but kept for full code) ---
   void _showAddStudentModal() {
     final fName = TextEditingController(); final mName = TextEditingController(); final lName = TextEditingController(); final lrn = TextEditingController();
     String? selectedGrade;

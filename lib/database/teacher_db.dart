@@ -76,4 +76,6 @@ class ActivityDatabase {
     final db = await instance.database;
     return await db.query('announcements', orderBy: 'id DESC');
   }
+
+  Future<Object?> readAllAnnouncements() async {}
 }

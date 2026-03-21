@@ -9,7 +9,7 @@ class DatabaseHelper {
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('user_data.db'); // Consolidating into one file [cite: 1]
+    _database = await _initDB('user_data.db');
     return _database!;
   }
 
@@ -19,18 +19,22 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 2, // Version 2 to support the 'students' table and 'status' column
+      version: 3, // Bumped version to 3 to add status to users table
       onCreate: _createDB,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           await _createStudentsTable(db);
+        }
+        // ADDED: Logic to add status column to users if upgrading from v2 to v3
+        if (oldVersion < 3) {
+          await db.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'Active'");
         }
       },
     );
   }
 
   Future _createDB(Database db, int version) async {
-    // Table for User Accounts (Teachers/Guardians)
+    // UPDATED: Added 'status' column to the initial creation
     await db.execute('''
       CREATE TABLE users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,7 +43,8 @@ class DatabaseHelper {
         lastName TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
         role TEXT NOT NULL,
-        password TEXT NOT NULL
+        password TEXT NOT NULL,
+        status TEXT DEFAULT 'Active' 
       )
     ''');
 
@@ -47,7 +52,6 @@ class DatabaseHelper {
   }
 
   Future _createStudentsTable(Database db) async {
-    // Table for Student Management
     await db.execute('''
       CREATE TABLE students (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,27 +69,42 @@ class DatabaseHelper {
 
   Future<int> registerUser(Map<String, dynamic> row) async {
     final db = await instance.database;
-    return await db.insert('users', row);
+    // Ensure new users start as Active
+    var data = Map<String, dynamic>.from(row);
+    data['status'] = 'Active';
+    return await db.insert('users', data);
   }
 
   Future<Map<String, dynamic>?> loginUser(String email, String password) async {
     final db = await instance.database;
     final results = await db.query(
       'users',
-      where: 'email = ? AND password = ?',
-      whereArgs: [email, password],
+      where: 'email = ? AND password = ? AND status = ?',
+      whereArgs: [email, password, 'Active'], // Only let active users login
     );
     return results.isNotEmpty ? results.first : null;
   }
 
   // --- ADMIN METHODS (Teachers & Guardians) ---
 
+  // UPDATED: Filter to only show Active users in the main lists
   Future<List<Map<String, dynamic>>> readUsersByRole(String role) async {
     final db = await instance.database;
     return await db.query(
         'users',
-        where: 'role = ?',
-        whereArgs: [role],
+        where: 'role = ? AND status = ?',
+        whereArgs: [role, 'Active'],
+        orderBy: 'lastName ASC'
+    );
+  }
+
+  // ADDED: Fetch archived teachers/guardians for the Archives tab
+  Future<List<Map<String, dynamic>>> readArchivedUsers() async {
+    final db = await instance.database;
+    return await db.query(
+        'users',
+        where: 'status = ?',
+        whereArgs: ['Archived'],
         orderBy: 'lastName ASC'
     );
   }
@@ -93,8 +112,19 @@ class DatabaseHelper {
   Future<int> archiveUser(int id) async {
     final db = await instance.database;
     return await db.update(
-      'users', // Assuming your table name is 'users'
+      'users',
       {'status': 'Archived'},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // ADDED: Restore method for Teachers/Guardians
+  Future<int> restoreUser(int id) async {
+    final db = await instance.database;
+    return await db.update(
+      'users',
+      {'status': 'Active'},
       where: 'id = ?',
       whereArgs: [id],
     );

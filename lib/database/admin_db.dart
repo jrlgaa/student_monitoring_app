@@ -19,13 +19,12 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 3, // Bumped version to 3 to add status to users table
+      version: 3,
       onCreate: _createDB,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           await _createStudentsTable(db);
         }
-        // ADDED: Logic to add status column to users if upgrading from v2 to v3
         if (oldVersion < 3) {
           await db.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'Active'");
         }
@@ -34,7 +33,6 @@ class DatabaseHelper {
   }
 
   Future _createDB(Database db, int version) async {
-    // UPDATED: Added 'status' column to the initial creation
     await db.execute('''
       CREATE TABLE users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,7 +67,6 @@ class DatabaseHelper {
 
   Future<int> registerUser(Map<String, dynamic> row) async {
     final db = await instance.database;
-    // Ensure new users start as Active
     var data = Map<String, dynamic>.from(row);
     data['status'] = 'Active';
     return await db.insert('users', data);
@@ -80,14 +77,13 @@ class DatabaseHelper {
     final results = await db.query(
       'users',
       where: 'email = ? AND password = ? AND status = ?',
-      whereArgs: [email, password, 'Active'], // Only let active users login
+      whereArgs: [email, password, 'Active'],
     );
     return results.isNotEmpty ? results.first : null;
   }
 
   // --- ADMIN METHODS (Teachers & Guardians) ---
 
-  // UPDATED: Filter to only show Active users in the main lists
   Future<List<Map<String, dynamic>>> readUsersByRole(String role) async {
     final db = await instance.database;
     return await db.query(
@@ -98,7 +94,6 @@ class DatabaseHelper {
     );
   }
 
-  // ADDED: Fetch archived teachers/guardians for the Archives tab
   Future<List<Map<String, dynamic>>> readArchivedUsers() async {
     final db = await instance.database;
     return await db.query(
@@ -106,6 +101,17 @@ class DatabaseHelper {
         where: 'status = ?',
         whereArgs: ['Archived'],
         orderBy: 'lastName ASC'
+    );
+  }
+
+  // ADDED: Update User Method to fix the "updateUser isn't defined" error
+  Future<int> updateUser(int id, Map<String, dynamic> data) async {
+    final db = await instance.database;
+    return await db.update(
+      'users',
+      data,
+      where: 'id = ?',
+      whereArgs: [id],
     );
   }
 
@@ -119,7 +125,6 @@ class DatabaseHelper {
     );
   }
 
-  // ADDED: Restore method for Teachers/Guardians
   Future<int> restoreUser(int id) async {
     final db = await instance.database;
     return await db.update(
@@ -130,6 +135,7 @@ class DatabaseHelper {
     );
   }
 
+  // Permanent Delete for Teachers/Guardians in Archive
   Future<int> deleteUser(int id) async {
     final db = await instance.database;
     return await db.delete('users', where: 'id = ?', whereArgs: [id]);
@@ -167,6 +173,7 @@ class DatabaseHelper {
     return await db.update('students', {'status': 'Active'}, where: 'id = ?', whereArgs: [id]);
   }
 
+  // Permanent Delete for Students in Archive
   Future<int> deleteStudent(int id) async {
     final db = await instance.database;
     return await db.delete('students', where: 'id = ?', whereArgs: [id]);

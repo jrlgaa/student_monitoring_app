@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart'; // 1. Import Firebase Core
 // Keep your existing imports
 import 'auth/login_page.dart';
 import 'auth/signup_page.dart';
+import 'auth/forgot_password_page.dart';
 import 'dashboard/teacher_page.dart';
 import 'dashboard/guardian_page.dart';
 import 'dashboard/admin_page.dart';
@@ -73,6 +74,10 @@ class _MyAppState extends State<MyApp> {
           isDarkMode: isDarkMode,
         ),
         '/admin-dashboard': (context) => AdminPage(
+          toggleTheme: toggleTheme,
+          isDarkMode: isDarkMode,
+        ),
+        '/forgot-password': (context) => ForgotPasswordPage(
           toggleTheme: toggleTheme,
           isDarkMode: isDarkMode,
         ),

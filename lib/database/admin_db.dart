@@ -1,15 +1,15 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
-class AdminDatabase {
-  static final AdminDatabase instance = AdminDatabase._init();
+class DatabaseHelper {
+  static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
 
-  AdminDatabase._init();
+  DatabaseHelper._init();
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('admin.db');
+    _database = await _initDB('user_data.db'); // Consolidating into one file [cite: 1]
     return _database!;
   }
 
@@ -19,17 +19,35 @@ class AdminDatabase {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 2, // Version 2 to support the 'students' table and 'status' column
       onCreate: _createDB,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
-          await db.execute("ALTER TABLE students ADD COLUMN status TEXT DEFAULT 'Active'");
+          await _createStudentsTable(db);
         }
       },
     );
   }
 
   Future _createDB(Database db, int version) async {
+    // Table for User Accounts (Teachers/Guardians)
+    await db.execute('''
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        firstName TEXT NOT NULL,
+        middleName TEXT,
+        lastName TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE,
+        role TEXT NOT NULL,
+        password TEXT NOT NULL
+      )
+    ''');
+
+    await _createStudentsTable(db);
+  }
+
+  Future _createStudentsTable(Database db) async {
+    // Table for Student Management
     await db.execute('''
       CREATE TABLE students (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,7 +61,43 @@ class AdminDatabase {
     ''');
   }
 
-  Future<int> createStudent(Map<String, String> student) async {
+  // --- AUTHENTICATION METHODS ---
+
+  Future<int> registerUser(Map<String, dynamic> row) async {
+    final db = await instance.database;
+    return await db.insert('users', row);
+  }
+
+  Future<Map<String, dynamic>?> loginUser(String email, String password) async {
+    final db = await instance.database;
+    final results = await db.query(
+      'users',
+      where: 'email = ? AND password = ?',
+      whereArgs: [email, password],
+    );
+    return results.isNotEmpty ? results.first : null;
+  }
+
+  // --- ADMIN METHODS (Teachers & Guardians) ---
+
+  Future<List<Map<String, dynamic>>> readUsersByRole(String role) async {
+    final db = await instance.database;
+    return await db.query(
+        'users',
+        where: 'role = ?',
+        whereArgs: [role],
+        orderBy: 'lastName ASC'
+    );
+  }
+
+  Future<int> deleteUser(int id) async {
+    final db = await instance.database;
+    return await db.delete('users', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // --- STUDENT MANAGEMENT METHODS ---
+
+  Future<int> createStudent(Map<String, dynamic> student) async {
     final db = await instance.database;
     return await db.insert('students', student);
   }
@@ -53,13 +107,12 @@ class AdminDatabase {
     return await db.query('students', where: 'status = ?', whereArgs: ['Active'], orderBy: 'lastName ASC');
   }
 
-  // NEW: Fetch archived students
   Future<List<Map<String, dynamic>>> readArchivedStudents() async {
     final db = await instance.database;
     return await db.query('students', where: 'status = ?', whereArgs: ['Archived'], orderBy: 'lastName ASC');
   }
 
-  Future<int> updateStudent(int id, Map<String, String> student) async {
+  Future<int> updateStudent(int id, Map<String, dynamic> student) async {
     final db = await instance.database;
     return await db.update('students', student, where: 'id = ?', whereArgs: [id]);
   }
@@ -69,7 +122,6 @@ class AdminDatabase {
     return await db.update('students', {'status': 'Archived'}, where: 'id = ?', whereArgs: [id]);
   }
 
-  // NEW: Restore from archive
   Future<int> restoreStudent(int id) async {
     final db = await instance.database;
     return await db.update('students', {'status': 'Active'}, where: 'id = ?', whereArgs: [id]);

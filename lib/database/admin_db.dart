@@ -90,6 +90,16 @@ class DatabaseHelper {
     );
   }
 
+  Future<int> archiveUser(int id) async {
+    final db = await instance.database;
+    return await db.update(
+      'users', // Assuming your table name is 'users'
+      {'status': 'Archived'},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   Future<int> deleteUser(int id) async {
     final db = await instance.database;
     return await db.delete('users', where: 'id = ?', whereArgs: [id]);

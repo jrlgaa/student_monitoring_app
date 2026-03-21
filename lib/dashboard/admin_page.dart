@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:project/database/admin_db.dart';
+import 'package:project/database/admin_db.dart'; // Ensure this points to your unified helper
 
 class AdminPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -22,7 +22,6 @@ class _AdminPageState extends State<AdminPage> {
 
   List<Map<String, dynamic>> _students = [];
   List<Map<String, dynamic>> _archivedStudents = [];
-  // UPDATED: Changed to dynamic to support database Map types
   List<Map<String, dynamic>> _teachers = [];
   List<Map<String, dynamic>> _guardians = [];
 
@@ -38,15 +37,12 @@ class _AdminPageState extends State<AdminPage> {
   @override
   void initState() {
     super.initState();
-    _refreshData(); // Renamed for clarity
+    _refreshData();
   }
 
-  // UPDATED: Fetches Students, Teachers, and Guardians from the database
   Future<void> _refreshData() async {
     final activeData = await DatabaseHelper.instance.readActiveStudents();
     final archivedData = await DatabaseHelper.instance.readArchivedStudents();
-
-    // Fetch from 'users' table based on role
     final teacherData = await DatabaseHelper.instance.readUsersByRole('Teacher');
     final guardianData = await DatabaseHelper.instance.readUsersByRole('Guardian');
 
@@ -168,7 +164,7 @@ class _AdminPageState extends State<AdminPage> {
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Wrap( // Changed to Wrap for better spacing
+          child: Wrap(
             spacing: 12,
             runSpacing: 12,
             children: [
@@ -206,9 +202,8 @@ class _AdminPageState extends State<AdminPage> {
 
   Widget _userListSection(String title) {
     List<dynamic> currentList = _getCurrentList();
-    bool isStudent = title == 'Students';
-    bool isArchive = title == 'Archives';
-    bool isStaff = title == 'Teachers' || title == 'Guardians';
+    bool isStudentTab = title == 'Students';
+    bool isArchiveTab = title == 'Archives';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -233,7 +228,7 @@ class _AdminPageState extends State<AdminPage> {
                   ),
                 ),
               ),
-              if (isStudent) ...[
+              if (isStudentTab) ...[
                 const SizedBox(width: 12),
                 ElevatedButton(
                   onPressed: () => _showAddStudentModal(),
@@ -253,8 +248,6 @@ class _AdminPageState extends State<AdminPage> {
             itemCount: currentList.length,
             itemBuilder: (context, index) {
               final user = currentList[index];
-
-              // UPDATED: Logic to handle both 'students' and 'users' table schemas
               bool isStudentData = user.containsKey('lrn');
               String displayName = "${user['firstName']} ${user['lastName']}";
 
@@ -267,46 +260,38 @@ class _AdminPageState extends State<AdminPage> {
                     child: Text(displayName.isNotEmpty ? displayName[0] : "?", style: const TextStyle(color: Colors.white)),
                   ),
                   title: Text(displayName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  // UPDATED: Show LRN for students, Email for Staff [cite: 278]
                   subtitle: Text(isStudentData
                       ? "LRN: ${user['lrn']} • ${user['grade']}"
                       : "${user['role']} • ${user['email']}"),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (isStudent) ...[
+                      if (isStudentTab)
                         IconButton(
                           icon: const Icon(Icons.edit, color: Colors.blue),
                           onPressed: () => _showEditStudentModal(user),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.archive, color: Colors.orange),
-                          onPressed: () async {
-                            await DatabaseHelper.instance.archiveStudent(user['id']);
-                            _refreshData();
-                          },
-                        ),
-                      ],
-                      if (isArchive) ...[
+                      if (isArchiveTab)
                         IconButton(
                           icon: const Icon(Icons.unarchive, color: Colors.green),
                           onPressed: () async {
                             await DatabaseHelper.instance.restoreStudent(user['id']);
                             _refreshData();
                           },
+                        )
+                      else
+                      // REPLACED DELETE with Archive icon for Teachers/Guardians/Active Students
+                        IconButton(
+                          icon: const Icon(Icons.archive, color: Colors.orange),
+                          onPressed: () async {
+                            if (isStudentData) {
+                              await DatabaseHelper.instance.archiveStudent(user['id']);
+                            } else {
+                              await DatabaseHelper.instance.archiveUser(user['id']);
+                            }
+                            _refreshData();
+                          },
                         ),
-                      ],
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                        onPressed: () async {
-                          if (isStudentData) {
-                            await DatabaseHelper.instance.deleteStudent(user['id']);
-                          } else {
-                            await DatabaseHelper.instance.deleteUser(user['id']);
-                          }
-                          _refreshData();
-                        },
-                      ),
                     ],
                   ),
                 ),
@@ -318,7 +303,6 @@ class _AdminPageState extends State<AdminPage> {
     );
   }
 
-  // (Methods _showAddStudentModal and _showEditStudentModal remain the same but call _refreshData())
   void _showAddStudentModal() {
     final TextEditingController fName = TextEditingController();
     final TextEditingController mName = TextEditingController();
@@ -338,11 +322,18 @@ class _AdminPageState extends State<AdminPage> {
                 TextField(controller: fName, decoration: const InputDecoration(labelText: "First Name")),
                 TextField(controller: mName, decoration: const InputDecoration(labelText: "Middle Name (Optional)")),
                 TextField(controller: lName, decoration: const InputDecoration(labelText: "Last Name")),
-                TextField(controller: lrn, decoration: const InputDecoration(labelText: "LRN (12 digits)"), keyboardType: TextInputType.number),
+                TextField(
+                  controller: lrn,
+                  decoration: const InputDecoration(labelText: "LRN (12 digits)"),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(12)],
+                ),
                 const SizedBox(height: 15),
                 DropdownButtonFormField<String>(
                   value: selectedGrade,
-                  items: ['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6'].map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
+                  items: ['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6']
+                      .map((g) => DropdownMenuItem(value: g, child: Text(g)))
+                      .toList(),
                   onChanged: (val) => setDialogState(() => selectedGrade = val),
                   decoration: const InputDecoration(labelText: "Grade Level"),
                 ),
@@ -354,15 +345,21 @@ class _AdminPageState extends State<AdminPage> {
             ElevatedButton(
               onPressed: () async {
                 if (fName.text.isNotEmpty && lName.text.isNotEmpty && lrn.text.length == 12 && selectedGrade != null) {
+                  // Ensure this uses the correct helper method
                   await DatabaseHelper.instance.createStudent({
                     'firstName': fName.text.trim(),
                     'middleName': mName.text.trim(),
                     'lastName': lName.text.trim(),
                     'lrn': lrn.text,
                     'grade': selectedGrade!,
+                    'status': 'Active', // Explicitly set status
                   });
                   _refreshData();
                   Navigator.pop(context);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Please fill all fields correctly (LRN must be 12 digits)")),
+                  );
                 }
               },
               child: const Text("Save"),
@@ -392,10 +389,17 @@ class _AdminPageState extends State<AdminPage> {
                 TextField(controller: fName, decoration: const InputDecoration(labelText: "First Name")),
                 TextField(controller: mName, decoration: const InputDecoration(labelText: "Middle Name (Optional)")),
                 TextField(controller: lName, decoration: const InputDecoration(labelText: "Last Name")),
-                TextField(controller: lrn, decoration: const InputDecoration(labelText: "LRN"), keyboardType: TextInputType.number),
+                TextField(
+                  controller: lrn,
+                  decoration: const InputDecoration(labelText: "LRN"),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(12)],
+                ),
                 DropdownButtonFormField<String>(
                   value: selectedGrade,
-                  items: ['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6'].map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
+                  items: ['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6']
+                      .map((g) => DropdownMenuItem(value: g, child: Text(g)))
+                      .toList(),
                   onChanged: (val) => setDialogState(() => selectedGrade = val),
                 ),
               ],

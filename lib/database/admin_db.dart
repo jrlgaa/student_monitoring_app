@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 4, // Incremented to version 4
       onCreate: _createDB,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -27,6 +27,13 @@ class DatabaseHelper {
         }
         if (oldVersion < 3) {
           await db.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'Active'");
+        }
+        // Migration for version 4: Change LRN to INTEGER
+        if (oldVersion < 4) {
+          // SQLite doesn't support direct column type changes.
+          // We recreate the table for the schema update.
+          await db.execute("DROP TABLE IF EXISTS students");
+          await _createStudentsTable(db);
         }
       },
     );
@@ -56,7 +63,7 @@ class DatabaseHelper {
         firstName TEXT NOT NULL,
         middleName TEXT,
         lastName TEXT NOT NULL,
-        lrn TEXT NOT NULL,
+        lrn INTEGER NOT NULL, -- Changed to INTEGER
         grade TEXT NOT NULL,
         status TEXT DEFAULT 'Active'
       )
@@ -64,7 +71,6 @@ class DatabaseHelper {
   }
 
   // --- AUTHENTICATION METHODS ---
-
   Future<int> registerUser(Map<String, dynamic> row) async {
     final db = await instance.database;
     var data = Map<String, dynamic>.from(row);
@@ -82,8 +88,7 @@ class DatabaseHelper {
     return results.isNotEmpty ? results.first : null;
   }
 
-  // --- ADMIN METHODS (Teachers & Guardians) ---
-
+  // --- ADMIN METHODS ---
   Future<List<Map<String, dynamic>>> readUsersByRole(String role) async {
     final db = await instance.database;
     return await db.query(
@@ -104,45 +109,27 @@ class DatabaseHelper {
     );
   }
 
-  // ADDED: Update User Method to fix the "updateUser isn't defined" error
   Future<int> updateUser(int id, Map<String, dynamic> data) async {
     final db = await instance.database;
-    return await db.update(
-      'users',
-      data,
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    return await db.update('users', data, where: 'id = ?', whereArgs: [id]);
   }
 
   Future<int> archiveUser(int id) async {
     final db = await instance.database;
-    return await db.update(
-      'users',
-      {'status': 'Archived'},
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    return await db.update('users', {'status': 'Archived'}, where: 'id = ?', whereArgs: [id]);
   }
 
   Future<int> restoreUser(int id) async {
     final db = await instance.database;
-    return await db.update(
-      'users',
-      {'status': 'Active'},
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    return await db.update('users', {'status': 'Active'}, where: 'id = ?', whereArgs: [id]);
   }
 
-  // Permanent Delete for Teachers/Guardians in Archive
   Future<int> deleteUser(int id) async {
     final db = await instance.database;
     return await db.delete('users', where: 'id = ?', whereArgs: [id]);
   }
 
   // --- STUDENT MANAGEMENT METHODS ---
-
   Future<int> createStudent(Map<String, dynamic> student) async {
     final db = await instance.database;
     return await db.insert('students', student);
@@ -173,7 +160,6 @@ class DatabaseHelper {
     return await db.update('students', {'status': 'Active'}, where: 'id = ?', whereArgs: [id]);
   }
 
-  // Permanent Delete for Students in Archive
   Future<int> deleteStudent(int id) async {
     final db = await instance.database;
     return await db.delete('students', where: 'id = ?', whereArgs: [id]);

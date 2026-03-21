@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:project/database/admin_db.dart'; // Ensure this points to your unified helper
+import 'package:project/database/admin_db.dart'; // Ensure this points to your updated helper
 
 class AdminPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -21,7 +21,7 @@ class _AdminPageState extends State<AdminPage> {
   bool isSidebarOpen = false;
 
   List<Map<String, dynamic>> _students = [];
-  List<Map<String, dynamic>> _archivedStudents = [];
+  List<Map<String, dynamic>> _allArchivedItems = []; // Combined list for Archives
   List<Map<String, dynamic>> _teachers = [];
   List<Map<String, dynamic>> _guardians = [];
 
@@ -41,16 +41,21 @@ class _AdminPageState extends State<AdminPage> {
   }
 
   Future<void> _refreshData() async {
+    // Fetch active and archived students
     final activeData = await DatabaseHelper.instance.readActiveStudents();
-    final archivedData = await DatabaseHelper.instance.readArchivedStudents();
+    final archivedStudents = await DatabaseHelper.instance.readArchivedStudents();
+
+    // Fetch active and archived teachers/guardians
     final teacherData = await DatabaseHelper.instance.readUsersByRole('Teacher');
     final guardianData = await DatabaseHelper.instance.readUsersByRole('Guardian');
+    final archivedUsers = await DatabaseHelper.instance.readArchivedUsers();
 
     setState(() {
       _students = activeData;
-      _archivedStudents = archivedData;
       _teachers = teacherData;
       _guardians = guardianData;
+      // Merge archived students and staff into one list for the Archives tab
+      _allArchivedItems = [...archivedStudents, ...archivedUsers];
     });
   }
 
@@ -58,7 +63,7 @@ class _AdminPageState extends State<AdminPage> {
     if (selectedIndex == 1) return _students;
     if (selectedIndex == 2) return _teachers;
     if (selectedIndex == 3) return _guardians;
-    if (selectedIndex == 4) return _archivedStudents;
+    if (selectedIndex == 4) return _allArchivedItems;
     return [];
   }
 
@@ -171,7 +176,7 @@ class _AdminPageState extends State<AdminPage> {
               _modernStatCard("Students", _students.length.toString(), Icons.school, Colors.blue),
               _modernStatCard("Teachers", _teachers.length.toString(), Icons.person_4, Colors.green),
               _modernStatCard("Guardians", _guardians.length.toString(), Icons.family_restroom, Colors.purple),
-              _modernStatCard("Archived", _archivedStudents.length.toString(), Icons.archive, Colors.orange),
+              _modernStatCard("Archived", _allArchivedItems.length.toString(), Icons.archive, Colors.orange),
             ],
           ),
         ),
@@ -275,12 +280,16 @@ class _AdminPageState extends State<AdminPage> {
                         IconButton(
                           icon: const Icon(Icons.unarchive, color: Colors.green),
                           onPressed: () async {
-                            await DatabaseHelper.instance.restoreStudent(user['id']);
+                            // Logic to restore correctly based on data type
+                            if (isStudentData) {
+                              await DatabaseHelper.instance.restoreStudent(user['id']);
+                            } else {
+                              await DatabaseHelper.instance.restoreUser(user['id']);
+                            }
                             _refreshData();
                           },
                         )
                       else
-                      // REPLACED DELETE with Archive icon for Teachers/Guardians/Active Students
                         IconButton(
                           icon: const Icon(Icons.archive, color: Colors.orange),
                           onPressed: () async {
@@ -345,14 +354,13 @@ class _AdminPageState extends State<AdminPage> {
             ElevatedButton(
               onPressed: () async {
                 if (fName.text.isNotEmpty && lName.text.isNotEmpty && lrn.text.length == 12 && selectedGrade != null) {
-                  // Ensure this uses the correct helper method
                   await DatabaseHelper.instance.createStudent({
                     'firstName': fName.text.trim(),
                     'middleName': mName.text.trim(),
                     'lastName': lName.text.trim(),
                     'lrn': lrn.text,
                     'grade': selectedGrade!,
-                    'status': 'Active', // Explicitly set status
+                    'status': 'Active',
                   });
                   _refreshData();
                   Navigator.pop(context);

@@ -22,8 +22,9 @@ class _AdminPageState extends State<AdminPage> {
 
   List<Map<String, dynamic>> _students = [];
   List<Map<String, dynamic>> _archivedStudents = [];
-  final List<Map<String, String>> _teachers = [];
-  final List<Map<String, String>> _guardians = [];
+  // UPDATED: Changed to dynamic to support database Map types
+  List<Map<String, dynamic>> _teachers = [];
+  List<Map<String, dynamic>> _guardians = [];
 
   final List<String> menuTitles = ['Dashboard', 'Students', 'Teachers', 'Guardians', 'Archives'];
   final List<IconData> menuIcons = [
@@ -37,15 +38,23 @@ class _AdminPageState extends State<AdminPage> {
   @override
   void initState() {
     super.initState();
-    _refreshStudents();
+    _refreshData(); // Renamed for clarity
   }
 
-  Future<void> _refreshStudents() async {
-    final activeData = await AdminDatabase.instance.readActiveStudents();
-    final archivedData = await AdminDatabase.instance.readArchivedStudents();
+  // UPDATED: Fetches Students, Teachers, and Guardians from the database
+  Future<void> _refreshData() async {
+    final activeData = await DatabaseHelper.instance.readActiveStudents();
+    final archivedData = await DatabaseHelper.instance.readArchivedStudents();
+
+    // Fetch from 'users' table based on role
+    final teacherData = await DatabaseHelper.instance.readUsersByRole('Teacher');
+    final guardianData = await DatabaseHelper.instance.readUsersByRole('Guardian');
+
     setState(() {
       _students = activeData;
       _archivedStudents = archivedData;
+      _teachers = teacherData;
+      _guardians = guardianData;
     });
   }
 
@@ -159,9 +168,13 @@ class _AdminPageState extends State<AdminPage> {
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Row(
+          child: Wrap( // Changed to Wrap for better spacing
+            spacing: 12,
+            runSpacing: 12,
             children: [
               _modernStatCard("Students", _students.length.toString(), Icons.school, Colors.blue),
+              _modernStatCard("Teachers", _teachers.length.toString(), Icons.person_4, Colors.green),
+              _modernStatCard("Guardians", _guardians.length.toString(), Icons.family_restroom, Colors.purple),
               _modernStatCard("Archived", _archivedStudents.length.toString(), Icons.archive, Colors.orange),
             ],
           ),
@@ -173,7 +186,6 @@ class _AdminPageState extends State<AdminPage> {
   Widget _modernStatCard(String title, String count, IconData icon, Color color) {
     return Container(
       width: 150,
-      margin: const EdgeInsets.only(right: 12),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: color.withOpacity(0.1),
@@ -196,6 +208,7 @@ class _AdminPageState extends State<AdminPage> {
     List<dynamic> currentList = _getCurrentList();
     bool isStudent = title == 'Students';
     bool isArchive = title == 'Archives';
+    bool isStaff = title == 'Teachers' || title == 'Guardians';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -240,16 +253,24 @@ class _AdminPageState extends State<AdminPage> {
             itemCount: currentList.length,
             itemBuilder: (context, index) {
               final user = currentList[index];
+
+              // UPDATED: Logic to handle both 'students' and 'users' table schemas
               bool isStudentData = user.containsKey('lrn');
-              String displayName = isStudentData ? "${user['firstName']} ${user['lastName']}" : user['name'] ?? "";
+              String displayName = "${user['firstName']} ${user['lastName']}";
 
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                 child: ListTile(
-                  leading: CircleAvatar(child: Text(displayName.isNotEmpty ? displayName[0] : "?")),
+                  leading: CircleAvatar(
+                    backgroundColor: isStudentData ? Colors.blue : Colors.green,
+                    child: Text(displayName.isNotEmpty ? displayName[0] : "?", style: const TextStyle(color: Colors.white)),
+                  ),
                   title: Text(displayName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text(isStudentData ? "LRN: ${user['lrn']} • ${user['grade']}" : "Active"),
+                  // UPDATED: Show LRN for students, Email for Staff [cite: 278]
+                  subtitle: Text(isStudentData
+                      ? "LRN: ${user['lrn']} • ${user['grade']}"
+                      : "${user['role']} • ${user['email']}"),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -261,8 +282,8 @@ class _AdminPageState extends State<AdminPage> {
                         IconButton(
                           icon: const Icon(Icons.archive, color: Colors.orange),
                           onPressed: () async {
-                            await AdminDatabase.instance.archiveStudent(user['id']);
-                            _refreshStudents();
+                            await DatabaseHelper.instance.archiveStudent(user['id']);
+                            _refreshData();
                           },
                         ),
                       ],
@@ -270,8 +291,8 @@ class _AdminPageState extends State<AdminPage> {
                         IconButton(
                           icon: const Icon(Icons.unarchive, color: Colors.green),
                           onPressed: () async {
-                            await AdminDatabase.instance.restoreStudent(user['id']);
-                            _refreshStudents();
+                            await DatabaseHelper.instance.restoreStudent(user['id']);
+                            _refreshData();
                           },
                         ),
                       ],
@@ -279,9 +300,11 @@ class _AdminPageState extends State<AdminPage> {
                         icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
                         onPressed: () async {
                           if (isStudentData) {
-                            await AdminDatabase.instance.deleteStudent(user['id']);
-                            _refreshStudents();
+                            await DatabaseHelper.instance.deleteStudent(user['id']);
+                          } else {
+                            await DatabaseHelper.instance.deleteUser(user['id']);
                           }
+                          _refreshData();
                         },
                       ),
                     ],
@@ -295,6 +318,7 @@ class _AdminPageState extends State<AdminPage> {
     );
   }
 
+  // (Methods _showAddStudentModal and _showEditStudentModal remain the same but call _refreshData())
   void _showAddStudentModal() {
     final TextEditingController fName = TextEditingController();
     final TextEditingController mName = TextEditingController();
@@ -330,14 +354,14 @@ class _AdminPageState extends State<AdminPage> {
             ElevatedButton(
               onPressed: () async {
                 if (fName.text.isNotEmpty && lName.text.isNotEmpty && lrn.text.length == 12 && selectedGrade != null) {
-                  await AdminDatabase.instance.createStudent({
+                  await DatabaseHelper.instance.createStudent({
                     'firstName': fName.text.trim(),
                     'middleName': mName.text.trim(),
                     'lastName': lName.text.trim(),
                     'lrn': lrn.text,
                     'grade': selectedGrade!,
                   });
-                  _refreshStudents();
+                  _refreshData();
                   Navigator.pop(context);
                 }
               },
@@ -381,14 +405,14 @@ class _AdminPageState extends State<AdminPage> {
             TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
             ElevatedButton(
               onPressed: () async {
-                await AdminDatabase.instance.updateStudent(student['id'], {
+                await DatabaseHelper.instance.updateStudent(student['id'], {
                   'firstName': fName.text.trim(),
                   'middleName': mName.text.trim(),
                   'lastName': lName.text.trim(),
                   'lrn': lrn.text,
                   'grade': selectedGrade!,
                 });
-                _refreshStudents();
+                _refreshData();
                 Navigator.pop(context);
               },
               child: const Text("Update"),

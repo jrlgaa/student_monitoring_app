@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 // IMPORTANT: Pointing to your specific database file
-import 'package:project/database/signup_db.dart';
+import 'package:project/database/admin_db.dart';
 
 class SignUpPage extends StatefulWidget {
   final VoidCallback toggleTheme;

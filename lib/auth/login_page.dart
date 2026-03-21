@@ -15,13 +15,20 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
+  final TextEditingController newPasswordController = TextEditingController();
+  final TextEditingController confirmPasswordController = TextEditingController();
   bool _obscurePassword = true;
   bool _isLoading = false;
+  bool _showForgotPassword = false;
+  bool _showPasswordFields = false;
+  int? _userId;
 
   @override
   void dispose() {
     emailController.dispose();
     passwordController.dispose();
+    newPasswordController.dispose();
+    confirmPasswordController.dispose();
     super.dispose();
   }
 
@@ -80,6 +87,102 @@ class _LoginPageState extends State<LoginPage> {
   void _showSnackBar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> handleForgotPassword() async {
+    String email = emailController.text.trim();
+    if (email.isEmpty) {
+      _showSnackBar('Please enter your email address');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final dbPath = await getDatabasesPath();
+      final path = p.join(dbPath, 'user_data.db');
+      final Database db = await openDatabase(path);
+
+      final List<Map<String, dynamic>> results = await db.query(
+        'users',
+        where: 'email = ? AND status = ?',
+        whereArgs: [email, 'Active'],
+      );
+
+      if (results.isNotEmpty) {
+        setState(() {
+          _userId = results[0]['id'] as int;
+          _showPasswordFields = true;
+        });
+        _showSnackBar('Enter your new password below.');
+      } else {
+        _showSnackBar('Invalid or unregistered email');
+      }
+    } catch (e) {
+      _showSnackBar('Error checking email: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> resetPassword() async {
+    String newPass = newPasswordController.text.trim();
+    String confirmPass = confirmPasswordController.text.trim();
+
+    if (newPass.isEmpty || confirmPass.isEmpty) {
+      _showSnackBar('Please fill in both password fields');
+      return;
+    }
+
+    if (newPass.length < 6) {
+      _showSnackBar('Password must be at least 6 characters');
+      return;
+    }
+
+    if (newPass != confirmPass) {
+      _showSnackBar('Passwords do not match');
+      return;
+    }
+
+    if (_userId == null) {
+      _showSnackBar('No user selected. Please enter email first.');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final dbPath = await getDatabasesPath();
+      final path = p.join(dbPath, 'user_data.db');
+      final Database db = await openDatabase(path);
+
+      final rowsAffected = await db.update(
+        'users',
+        {'password': newPass},
+        where: 'id = ?',
+        whereArgs: [_userId],
+      );
+
+      if (rowsAffected > 0) {
+        _showSnackBar('Password updated successfully');
+        // Reset form
+        setState(() {
+          _showForgotPassword = false;
+          _showPasswordFields = false;
+          _userId = null;
+          emailController.clear();
+          newPasswordController.clear();
+          confirmPasswordController.clear();
+          passwordController.clear();
+        });
+      } else {
+        _showSnackBar('Failed to update password');
+      }
+    } catch (e) {
+      _showSnackBar('Error updating password: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   @override
@@ -157,6 +260,39 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                 ),
+                if (_showPasswordFields) ...[
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: newPasswordController,
+                    obscureText: true,
+                    decoration: InputDecoration(
+                      hintText: 'New Password (min 6 chars)',
+                      prefixIcon: const Icon(Icons.lock_outline),
+                      filled: true,
+                      fillColor: widget.isDarkMode ? Colors.grey[700]?.withOpacity(0.2) : Colors.grey[100],
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: confirmPasswordController,
+                    obscureText: true,
+                    decoration: InputDecoration(
+                      hintText: 'Confirm New Password',
+                      prefixIcon: const Icon(Icons.lock),
+                      filled: true,
+                      fillColor: widget.isDarkMode ? Colors.grey[700]?.withOpacity(0.2) : Colors.grey[100],
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,
@@ -166,10 +302,22 @@ class _LoginPageState extends State<LoginPage> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       elevation: 0,
                     ),
-                    onPressed: _isLoading ? null : login,
+                    onPressed: _isLoading ? null : (_showPasswordFields ? resetPassword : login),
                     child: _isLoading
                         ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : const Text('Sign in', style: TextStyle(fontSize: 16)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                GestureDetector(
+                  onTap: handleForgotPassword,
+                  child: Text(
+                    'Forgot Password?',
+                    style: TextStyle(
+                      color: Colors.blue,
+                      fontWeight: FontWeight.bold,
+                      decoration: TextDecoration.underline,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 24),

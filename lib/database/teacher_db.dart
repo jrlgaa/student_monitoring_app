@@ -22,14 +22,12 @@ class ActivityDatabase {
       path,
       version: 1,
       onCreate: _createDB,
-      // Runs every time the DB is opened — guarantees tables exist
-      // even if the DB file was created before the schema was defined
       onOpen: _ensureTables,
     );
   }
 
-  // Called on every open to safely create missing tables
   Future _ensureTables(Database db) async {
+    // 1. Users table (Teachers/Staff)
     await db.execute('''
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,13 +44,12 @@ class ActivityDatabase {
       )
     ''');
 
-    // Add teacher_id column to existing DBs that were created before this column existed
+    // Migration for teacher_id column
     try {
       await db.execute('ALTER TABLE users ADD COLUMN teacher_id TEXT');
-    } catch (_) {
-      // Column already exists — safe to ignore
-    }
+    } catch (_) {}
 
+    // 2. Activities table
     await db.execute('''
       CREATE TABLE IF NOT EXISTS activities (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,6 +61,7 @@ class ActivityDatabase {
       )
     ''');
 
+    // 3. Announcements table
     await db.execute('''
       CREATE TABLE IF NOT EXISTS announcements (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,16 +70,56 @@ class ActivityDatabase {
         date TEXT NOT NULL
       )
     ''');
+
+    // 4. STUDENT GRADES TABLE (New)
+    // UNIQUE constraint ensures one grade per student per activity
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS student_grades (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        studentName TEXT NOT NULL,
+        activityKey TEXT NOT NULL,
+        grade REAL,
+        status TEXT,
+        UNIQUE(studentName, activityKey) ON CONFLICT REPLACE
+      )
+    ''');
   }
 
-  // Delegates to _ensureTables so both paths stay in sync
   Future _createDB(Database db, int version) async {
     await _ensureTables(db);
   }
 
-  // --- DYNAMIC PROFILE METHODS ---
+  // --- GRADE PERSISTENCE METHODS ---
 
-  // Generates a unique Teacher ID in the format xxxx-xx (e.g. 4821-37)
+  /// Saves or updates a student's grade for a specific activity
+  Future<int> saveStudentGrade(String name, String key, double? grade, String status) async {
+    final db = await instance.database;
+    return await db.insert('student_grades', {
+      'studentName': name,
+      'activityKey': key,
+      'grade': grade,
+      'status': status,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// Fetches all saved grades to populate the Teacher Progress UI
+  Future<List<Map<String, dynamic>>> getAllGrades() async {
+    final db = await instance.database;
+    return await db.query('student_grades');
+  }
+
+  /// Deletes grades associated with a specific activity (used when an activity is removed)
+  Future<int> deleteGradesByActivity(String activityKey) async {
+    final db = await instance.database;
+    return await db.delete(
+      'student_grades',
+      where: 'activityKey = ?',
+      whereArgs: [activityKey],
+    );
+  }
+
+  // --- TEACHER PROFILE METHODS ---
+
   String _generateTeacherId() {
     final ms = DateTime.now().millisecondsSinceEpoch;
     final fourDigit = (ms % 9000 + 1000).toString().padLeft(4, '0');
@@ -92,29 +130,15 @@ class ActivityDatabase {
   Future<Map<String, dynamic>?> getTeacherProfile() async {
     try {
       final db = await instance.database;
-
-      final maps = await db.query(
-        'users',
-        where: 'role = ?',
-        whereArgs: ['Teacher'],
-        limit: 1,
-      );
+      final maps = await db.query('users', where: 'role = ?', whereArgs: ['Teacher'], limit: 1);
 
       if (maps.isNotEmpty) {
         final data = maps.first;
-
-        // If teacher_id is missing/null/empty, generate and persist one now
         String teacherId = (data['teacher_id'] ?? '').toString().trim();
         if (teacherId.isEmpty) {
           teacherId = _generateTeacherId();
-          await db.update(
-            'users',
-            {'teacher_id': teacherId},
-            where: 'id = ?',
-            whereArgs: [data['id']],
-          );
+          await db.update('users', {'teacher_id': teacherId}, where: 'id = ?', whereArgs: [data['id']]);
         }
-
         return {
           'teacherId': teacherId,
           'name': '${data['firstName']} ${data['lastName']}',
@@ -123,9 +147,8 @@ class ActivityDatabase {
           'subject': data['subject'] ?? '',
           'advisoryClass': data['advisoryClass'] ?? '',
         };
-      } else {
-        return null; // Let the caller's fallback handle this
       }
+      return null;
     } catch (e) {
       return null;
     }
@@ -133,11 +156,9 @@ class ActivityDatabase {
 
   Future<int> updateTeacherProfile(Map<String, dynamic> profile) async {
     final db = await instance.database;
-
     List<String> nameParts = (profile['name'] as String).split(' ');
     String fName = nameParts.isNotEmpty ? nameParts[0] : '';
     String lName = nameParts.length > 1 ? nameParts.sublist(1).join(' ') : '';
-
     final String teacherId = profile['teacherId']?.toString() ?? '';
 
     final rowData = {
@@ -150,19 +171,12 @@ class ActivityDatabase {
       'teacher_id': teacherId,
     };
 
-    // Try updating the existing Teacher row by teacher_id first
     int rowsAffected = 0;
     if (teacherId.isNotEmpty) {
-      rowsAffected = await db.update(
-        'users',
-        rowData,
-        where: 'teacher_id = ?',
-        whereArgs: [teacherId],
-      );
+      rowsAffected = await db.update('users', rowData, where: 'teacher_id = ?', whereArgs: [teacherId]);
     }
 
     if (rowsAffected == 0) {
-      // No existing row — insert a new one with role = 'Teacher'
       return await db.insert('users', {
         ...rowData,
         'role': 'Teacher',
@@ -170,9 +184,10 @@ class ActivityDatabase {
         'middleName': '',
       });
     }
-
     return rowsAffected;
   }
+
+  // --- ACTIVITY & ANNOUNCEMENT METHODS ---
 
   Future<int> insertActivity(Map<String, dynamic> activity) async {
     final db = await instance.database;

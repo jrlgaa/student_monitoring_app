@@ -1,4 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:path/path.dart' as p;
 
 class GuardianPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -17,223 +21,177 @@ class GuardianPage extends StatefulWidget {
 class _GuardianPageState extends State<GuardianPage> {
   int selectedIndex = 0;
   bool isSidebarOpen = false;
+  bool isLoading = true;
+  bool isEditing = false;
 
-final List<String> students = [
-    'Dometita, Rainer',
-    'Mendoza, Ryan Caesar',
-    'Gaa, Jeriel',
-    'Tagapan, Jhem',
-    'Tayag, Joshua',
-    'Ravida, Kris Lawrence'
+  // Profile Controllers
+  late TextEditingController _firstNameController;
+  late TextEditingController _middleNameController;
+  late TextEditingController _lastNameController;
+  late TextEditingController _phoneController;
+
+  List<Map<String, dynamic>> _activities = [];
+  List<Map<String, dynamic>> _announcements = [];
+  final List<Map<String, String>> _myRegisteredStudents = [];
+
+  final Map<String, String> _profileData = {
+    'firstName': 'Ryan Caesar',
+    'middleName': '',
+    'lastName': 'Mendoza',
+    'id': 'G2024-0812',
+    'phone': '9123456789', // Stored as raw digits
+  };
+
+  String get _getFullName {
+    String first = _profileData['firstName'] ?? '';
+    String middle = _profileData['middleName'] ?? '';
+    String last = _profileData['lastName'] ?? '';
+    return middle.isEmpty ? "$first $last".trim() : "$first $middle $last".trim();
+  }
+
+  final List<String> students = [
+    'Dometita, Rainer', 'Mendoza, Ryan Caesar', 'Gaa, Jeriel',
+    'Tagapan, Jhem', 'Tayag, Joshua', 'Ravida, Kris Lawrence'
   ];
 
-  // Mock data matching teacher
-  List<Map<String, dynamic>> _activities = [
-    {'title': 'Homework 1', 'description': 'Math problems', 'date': 'Yesterday'},
-    {'title': 'Quiz 1', 'description': 'Science quiz', 'date': '2 days ago'},
-  ];
+  Map<String, Map<String, Map<String, dynamic>>> _studentGrades = {};
 
-  Map<String, Map<String, Map<String, dynamic>>> _studentGrades = {}; // student -> activityKey -> data
+  final List<String> menuTitles = ['Activities', 'Student Grades', 'Announcements', 'Add Student', 'Profile'];
+  final List<IconData> menuIcons = [Icons.folder, Icons.school, Icons.campaign, Icons.person_add, Icons.person];
 
-  final List<String> menuTitles = [
-    'Activities',
-    'Student Grades',
-    'Announcements',
-    'Attendance',
-    'Profile',
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _firstNameController = TextEditingController(text: _profileData['firstName']);
+    _middleNameController = TextEditingController(text: _profileData['middleName']);
+    _lastNameController = TextEditingController(text: _profileData['lastName']);
+    _phoneController = TextEditingController(text: _profileData['phone']);
+    _fetchDatabaseData();
+  }
 
-  final List<IconData> menuIcons = [
-    Icons.folder,
-    Icons.school,
-    Icons.campaign,
-    Icons.calendar_month,
-    Icons.person,
-  ];
+  @override
+  void dispose() {
+    _firstNameController.dispose();
+    _middleNameController.dispose();
+    _lastNameController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _fetchDatabaseData() async {
+    setState(() => isLoading = true);
+    try {
+      final dbPath = await getDatabasesPath();
+      final path = p.join(dbPath, 'teacher_data.db');
+      final Database db = await openDatabase(path);
+
+      final List<Map<String, dynamic>> activityMaps = await db.query('activities', orderBy: 'id DESC');
+      final List<Map<String, dynamic>> announcementMaps = await db.query('announcements', orderBy: 'id DESC');
+
+      setState(() {
+        _activities = activityMaps;
+        _announcements = announcementMaps;
+        _initGuardianGrades();
+        isLoading = false;
+      });
+    } catch (e) {
+      debugPrint("Database Error: $e");
+      setState(() => isLoading = false);
+    }
+  }
+
+  Future<void> _updateProfileInDatabase() async {
+    try {
+      final dbPath = await getDatabasesPath();
+      final path = p.join(dbPath, 'teacher_data.db');
+      final Database db = await openDatabase(path);
+
+      await db.update(
+        'users',
+        {
+          'first_name': _profileData['firstName'],
+          'middle_name': _profileData['middleName'],
+          'last_name': _profileData['lastName'],
+          'phone': _profileData['phone'],
+        },
+        where: 'id = ?',
+        whereArgs: [_profileData['id']],
+      );
+    } catch (e) {
+      debugPrint("Update Error: $e");
+    }
+  }
+
+  void _initGuardianGrades() {
+    for (String student in students) {
+      _studentGrades[student] = {};
+      for (var activity in _activities) {
+        String key = '${activity['title']}_${activity['date']}';
+        _studentGrades[student]![key] = {'grade': 85.0, 'maxScore': 100.0, 'status': 'Graded'};
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // FIX: Prevents layout overflow when the keyboard opens for uploading
-      resizeToAvoidBottomInset: false,
-
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: Stack(
           children: [
-            // ================= MAIN CONTENT =================
-            Container(
-              color: widget.isDarkMode ? Colors.grey[900] : Colors.white,
-              child: _buildSection(),
-            ),
-
-            // ================= OVERLAY SIDEBAR =================
-            if (isSidebarOpen)
-              Positioned.fill(
-                child: GestureDetector(
-                  onTap: () => setState(() => isSidebarOpen = false),
-                  child: Container(color: Colors.black26),
-                ),
-              ),
-
-            // ================= SIDEBAR DRAWER =================
-            AnimatedPositioned(
-              duration: const Duration(milliseconds: 300),
-              left: isSidebarOpen ? 0 : -260,
-              top: 0,
-              bottom: 0,
-              width: 260,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: widget.isDarkMode ? Colors.grey[900] : Colors.white,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      blurRadius: 10,
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    const SizedBox(height: 12),
-                    // HAMBURGER MENU ICON
-                    SizedBox(
-                      width: double.infinity,
-                      height: 50,
-                      child: Center(
-                        child: IconButton(
-                          icon: const Icon(Icons.menu),
-                          onPressed: () => setState(() => isSidebarOpen = !isSidebarOpen),
-                        ),
-                      ),
-                    ),
-
-                    // PROFILE SECTION
-                    const SizedBox(height: 20),
-                    const CircleAvatar(
-                      radius: 40,
-                      backgroundColor: Colors.blue,
-                      child: Icon(Icons.person, size: 40, color: Colors.white),
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      "Maria Santos",
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
-                    const Text(
-                      "Guardian ID: G2024-001",
-                      style: TextStyle(color: Colors.grey, fontSize: 12),
-                    ),
-                    const SizedBox(height: 30),
-
-                    // NAVIGATION MENU
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: menuTitles.length,
-                        itemBuilder: (context, index) {
-                          final selected = index == selectedIndex;
-                          return ListTile(
-                            leading: Icon(menuIcons[index], color: selected ? Colors.blue : null),
-                            title: Text(menuTitles[index],
-                                style: TextStyle(
-                                  fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-                                  color: selected ? Colors.blue : null,
-                                )),
-                            selected: selected,
-                            selectedTileColor: Colors.blue.withOpacity(0.05),
-                            onTap: () {
-                              setState(() {
-                                selectedIndex = index;
-                                isSidebarOpen = false;
-                              });
-                            },
-                          );
-                        },
-                      ),
-                    ),
-
-                    // BOTTOM SECTION: THEME & LOGOUT
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.blue.withOpacity(0.05),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: ListTile(
-                          title: const Text("Dark Mode"),
-                          trailing: Switch(
-                            value: widget.isDarkMode,
-                            onChanged: (_) => widget.toggleTheme(),
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    ListTile(
-                      leading: const Icon(Icons.logout, color: Colors.redAccent),
-                      title: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
-                      onTap: () => Navigator.pushReplacementNamed(context, '/login'),
-                    ),
-                    const SizedBox(height: 20),
-                  ],
-                ),
-              ),
-            ),
-
-            // ================= HAMBURGER MENU BUTTON (Floating) =================
-            if (!isSidebarOpen)
-              Positioned(
-                top: 16,
-                left: 16,
-                child: IconButton(
-                  icon: const Icon(Icons.menu),
-                  onPressed: () => setState(() => isSidebarOpen = true),
-                ),
-              ),
+            Container(color: widget.isDarkMode ? Colors.grey[900] : Colors.white, child: _buildSection()),
+            if (isSidebarOpen) Positioned.fill(child: GestureDetector(onTap: () => setState(() => isSidebarOpen = false), child: Container(color: Colors.black26))),
+            _buildSidebar(),
+            if (!isSidebarOpen) Positioned(top: 16, left: 16, child: IconButton(icon: Icon(Icons.menu, color: widget.isDarkMode ? Colors.white : Colors.black), onPressed: () => setState(() => isSidebarOpen = true))),
           ],
         ),
       ),
     );
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _initGuardianGrades();
-  }
-
-  void _initGuardianGrades() {
-    for (String student in students) {
-      _studentGrades[student] = {};
-      for (Map<String, dynamic> activity in _activities) {
-        String key = _getActivityKey(activity);
-        _studentGrades[student]![key] = {
-          'grade': 85.0, // Mock from teacher
-          'maxScore': 100.0,
-          'status': 'Graded',
-        };
-      }
-    }
-  }
-
-  String _getActivityKey(Map<String, dynamic> activity) {
-    return '${activity['title']}_${activity['date']}';
+  Widget _buildSidebar() {
+    return AnimatedPositioned(
+      duration: const Duration(milliseconds: 300),
+      left: isSidebarOpen ? 0 : -260,
+      top: 0, bottom: 0, width: 260,
+      child: Container(
+        decoration: BoxDecoration(color: widget.isDarkMode ? Colors.grey[900] : Colors.white, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10)]),
+        child: Column(
+          children: [
+            const SizedBox(height: 12),
+            IconButton(icon: Icon(Icons.menu, color: widget.isDarkMode ? Colors.white : Colors.black), onPressed: () => setState(() => isSidebarOpen = !isSidebarOpen)),
+            const SizedBox(height: 20),
+            const CircleAvatar(radius: 40, backgroundColor: Colors.blueAccent, child: Icon(Icons.person, size: 40, color: Colors.white)),
+            const SizedBox(height: 12),
+            Text(_getFullName, textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: widget.isDarkMode ? Colors.white : Colors.black)),
+            Text("Guardian ID: ${_profileData['id']}", style: const TextStyle(color: Colors.grey, fontSize: 12)),
+            const SizedBox(height: 30),
+            Expanded(child: ListView.builder(itemCount: menuTitles.length, itemBuilder: (context, index) {
+              final selected = index == selectedIndex;
+              return ListTile(
+                leading: Icon(menuIcons[index], color: selected ? Colors.blue : (widget.isDarkMode ? Colors.white70 : Colors.black54)),
+                title: Text(menuTitles[index], style: TextStyle(fontWeight: selected ? FontWeight.bold : FontWeight.normal, color: selected ? Colors.blue : (widget.isDarkMode ? Colors.white : Colors.black))),
+                onTap: () => setState(() { selectedIndex = index; isSidebarOpen = false; }),
+              );
+            })),
+            ListTile(title: const Text("Dark Mode"), trailing: Switch(value: widget.isDarkMode, onChanged: (_) => widget.toggleTheme())),
+            ListTile(leading: const Icon(Icons.logout, color: Colors.redAccent), title: const Text('Logout', style: TextStyle(color: Colors.redAccent)), onTap: () => Navigator.pushReplacementNamed(context, '/login')),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildSection() {
+    if (isLoading) return const Center(child: CircularProgressIndicator());
     switch (selectedIndex) {
-      case 0:
-        return _activitySection();
-      case 1:
-        return _studentGradesSection();
-      case 2:
-        return _announcementsSection();
-      case 3:
-        return _attendanceSection();
-      case 4:
-        return _genericSection('Profile', _profileContent());
-      default:
-        return const SizedBox();
+      case 0: return _activitySection();
+      case 1: return _studentGradesSection();
+      case 2: return _announcementsSection();
+      case 3: return _studentRegistrationSection();
+      case 4: return _genericSection('Guardian Profile', _profileContent());
+      default: return const SizedBox();
     }
   }
 
@@ -241,231 +199,204 @@ final List<String> students = [
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Increased left padding so the title clears the floating hamburger/menu area.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(72, 22, 24, 20),
-          child: Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-        ),
+        Padding(padding: const EdgeInsets.fromLTRB(72, 22, 24, 20), child: Text(title, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: widget.isDarkMode ? Colors.white : Colors.black))),
         Expanded(child: content),
       ],
     );
   }
 
-  Widget _profileContent() => Padding(
-    padding: const EdgeInsets.all(20),
-    child: Card(
-      child: ListTile(
-        leading: const CircleAvatar(child: Icon(Icons.person)),
-        title: const Text('Maria Santos'),
-        subtitle: const Text('guardian@school.com'),
-      ),
-    ),
-  );
-
-
-
-  // ================= 5. PROFILE (The most likely culprit for overflow) =================
-  Widget _profileSection() {
-    // FIX 4: Wrap profile content in a scroll view so it doesn't push against the bottom
-    return _genericSection('My Profile', SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+  Widget _profileContent() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
         children: [
-          Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: const ListTile(
-              contentPadding: EdgeInsets.all(16),
-              title: Text("Information"),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(height: 8),
-                  Text("Guardian Name: Maria Dela Cruz"),
-                  Text("Email: maria@email.com"),
-                ],
-              ),
-              trailing: Icon(Icons.edit),
-            ),
-          ),
-          const SizedBox(height: 20),
-          ElevatedButton.icon(
-            onPressed: () {},
-            icon: const Icon(Icons.add),
-            label: const Text("Add Student"),
-            style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
-          )
-        ],
-      ),
-    ));
-  }
-
-  // Rest of your sections remain the same...
-  Widget _activitySection() {
-    return _genericSection('Teacher Activities', ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      itemCount: 3,
-      itemBuilder: (context, index) => Card(
-        margin: const EdgeInsets.only(bottom: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: ListTile(
-          title: Text("New Learning Material: Module ${index + 1}"),
-          subtitle: const Text("Posted by Teacher Juan • 2 hours ago"),
-          trailing: const Icon(Icons.chevron_right),
-        ),
-      ),
-    ));
-  }
-
-  Widget _studentGradesSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Header
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 24, 20),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: const [
-              SizedBox(width: 48),
-              SizedBox(width: 8),
-              Text(
-                'Student Grades',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("Personal Info", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+              TextButton.icon(
+                onPressed: () async {
+                  if (isEditing) {
+                    setState(() {
+                      _profileData['firstName'] = _firstNameController.text;
+                      _profileData['middleName'] = _middleNameController.text;
+                      _profileData['lastName'] = _lastNameController.text;
+                      _profileData['phone'] = _phoneController.text;
+                      isEditing = false;
+                    });
+                    await _updateProfileInDatabase();
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Profile saved.")));
+                  } else {
+                    setState(() => isEditing = true);
+                  }
+                },
+                icon: Icon(isEditing ? Icons.check_circle : Icons.edit, size: 18),
+                label: Text(isEditing ? "Done" : "Edit"),
               ),
             ],
           ),
-        ),
-        Expanded(
-          child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: students.length,
-            separatorBuilder: (context, index) => const SizedBox(height: 8),
-            itemBuilder: (context, sIndex) {
-              String student = students[sIndex];
-              return Card(
-                margin: const EdgeInsets.only(bottom: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                child: ExpansionTile(
-                  title: Text(student, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Text('${_activities.length} activities'),
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        children: _activities.map((activity) {
-                          String key = _getActivityKey(activity);
-                          Map<String, dynamic>? gradeData = _studentGrades[student]?[key];
-                          double? grade = gradeData?['grade'];
-                          String status = gradeData?['status'] ?? 'Ungraded';
-                          return Card(
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(activity['title'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                                  Text(activity['description'] ?? ''),
-                                  Text('Posted: ${activity['date']}'),
-                                  const SizedBox(height: 8),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          '${grade?.toStringAsFixed(1) ?? '-'} / 100',
-                                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                                        ),
-                                      ),
-                                      Chip(
-                                        label: Text(status),
-                                        backgroundColor: status == 'Graded' ? Colors.green : Colors.grey,
-                                        labelStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _gradeTile(String subject, String grade) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.blue.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(subject, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          Text(grade, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          if (!isEditing) ...[
+            _buildInfoTile("Full Name", _getFullName, Icons.person),
+            _buildInfoTile("Phone Number", "+63 ${_profileData['phone']}", Icons.phone),
+            _buildInfoTile("Account ID", _profileData['id']!, Icons.badge_outlined),
+          ] else ...[
+            _buildEditableField("First Name", _firstNameController, Icons.person_outline),
+            _buildEditableField("Middle Name", _middleNameController, Icons.person_outline),
+            _buildEditableField("Last Name", _lastNameController, Icons.person_outline),
+            _buildEditableField(
+              "Phone Number",
+              _phoneController,
+              Icons.phone,
+              inputType: TextInputType.phone,
+              hint: "9XX XXXX XXXX",
+              isPhone: true,
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  Widget _buildEditableField(String label, TextEditingController controller, IconData icon, {TextInputType inputType = TextInputType.text, String? hint, bool isPhone = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: TextField(
+        controller: controller,
+        keyboardType: inputType,
+        inputFormatters: isPhone ? [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(10), // Limits to 10 digits after +63
+        ] : [],
+        style: TextStyle(color: widget.isDarkMode ? Colors.white : Colors.black),
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hint,
+          prefixText: isPhone ? "+63 " : null,
+          prefixIcon: Icon(icon, color: Colors.blueAccent),
+          filled: true,
+          fillColor: widget.isDarkMode ? Colors.grey[850] : Colors.grey[100],
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoTile(String label, String value, IconData icon) {
+    final textColor = widget.isDarkMode ? Colors.white : Colors.black;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: widget.isDarkMode ? Colors.grey[850] : Colors.grey[100], borderRadius: BorderRadius.circular(12)),
+      child: Row(children: [
+        Icon(icon, color: Colors.blueAccent),
+        const SizedBox(width: 16),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+          Text(value, style: TextStyle(color: textColor, fontSize: 16, fontWeight: FontWeight.bold)),
+        ])),
+      ]),
+    );
+  }
+
+  Widget _activitySection() {
+    return _genericSection('Teacher Activities', RefreshIndicator(
+      onRefresh: _fetchDatabaseData,
+      child: _activities.isEmpty ? const Center(child: Text("No activities.")) : ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        itemCount: _activities.length,
+        itemBuilder: (context, index) {
+          final act = _activities[index];
+          return Card(
+            color: widget.isDarkMode ? Colors.grey[850] : Colors.white,
+            margin: const EdgeInsets.only(bottom: 16),
+            child: ListTile(
+              title: Text(act['title'] ?? 'Untitled', style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text("Posted: ${act['date']}"),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => ActivityDetailPage(activity: act, isDarkMode: widget.isDarkMode))),
+            ),
+          );
+        },
+      ),
+    ));
   }
 
   Widget _announcementsSection() {
-    return _genericSection('Announcements', ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      itemCount: 2,
-      itemBuilder: (context, index) => Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey.withOpacity(0.2)),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("School General Assembly", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            SizedBox(height: 8),
-            Text("Please be informed that there will be a meeting this coming Friday...",
-                maxLines: 2, overflow: TextOverflow.ellipsis),
-          ],
-        ),
+    return _genericSection('Announcements', RefreshIndicator(
+      onRefresh: _fetchDatabaseData,
+      child: _announcements.isEmpty ? const Center(child: Text("No announcements.")) : ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        itemCount: _announcements.length,
+        itemBuilder: (context, index) {
+          final ann = _announcements[index];
+          return Card(
+            color: widget.isDarkMode ? Colors.grey[850] : Colors.white,
+            margin: const EdgeInsets.only(bottom: 12),
+            child: ListTile(
+              title: Text(ann['title'] ?? 'School Update', style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text(ann['date'] ?? ''),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => AnnouncementDetailPage(announcement: ann, isDarkMode: widget.isDarkMode))),
+            ),
+          );
+        },
       ),
     ));
   }
 
-  Widget _attendanceSection() {
-    return _genericSection('Attendance Records', Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _statItem("Present", "20", Colors.green),
-              _statItem("Absent", "2", Colors.red),
-            ],
-          ),
-        ),
-        const Expanded(child: Center(child: Text("Calendar View Placeholder"))),
-      ],
-    ));
-  }
+  Widget _studentRegistrationSection() => _genericSection('Add Student', const Center(child: Text("Registration Logic")));
+  Widget _studentGradesSection() => _genericSection('Student Grades', const Center(child: Text("Grades Logic")));
+}
 
-  Widget _statItem(String label, String count, Color color) {
-    return Column(
-      children: [
-        Text(count, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color)),
-        Text(label, style: const TextStyle(color: Colors.grey)),
-      ],
+// --- Detail Page Classes ---
+
+class AnnouncementDetailPage extends StatelessWidget {
+  final Map<String, dynamic> announcement;
+  final bool isDarkMode;
+  const AnnouncementDetailPage({super.key, required this.announcement, required this.isDarkMode});
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = isDarkMode ? Colors.white : Colors.black;
+    return Scaffold(
+      backgroundColor: isDarkMode ? Colors.black : Colors.white,
+      appBar: AppBar(title: const Text('Announcement Details'), backgroundColor: isDarkMode ? Colors.grey[900] : Colors.blueAccent),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(announcement['title'] ?? 'Update', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: textColor)),
+          const SizedBox(height: 8),
+          Text("Date: ${announcement['date']}", style: const TextStyle(color: Colors.grey)),
+          const Divider(height: 40),
+          Text(announcement['message'] ?? announcement['content'] ?? '', style: TextStyle(fontSize: 17, color: isDarkMode ? Colors.white70 : Colors.black87)),
+        ]),
+      ),
     );
   }
+}
 
-  Widget _activityGradesSection() => _genericSection('Activity Grades', const Center(child: Text('Chart/Grades List')));
+class ActivityDetailPage extends StatelessWidget {
+  final Map<String, dynamic> activity;
+  final bool isDarkMode;
+  const ActivityDetailPage({super.key, required this.activity, required this.isDarkMode});
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = isDarkMode ? Colors.white : Colors.black;
+    return Scaffold(
+      backgroundColor: isDarkMode ? Colors.black : Colors.grey[100],
+      appBar: AppBar(title: Text(activity['title'] ?? 'Detail'), backgroundColor: isDarkMode ? Colors.grey[900] : Colors.blueAccent),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(activity['title'] ?? 'No Title', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: textColor)),
+          const SizedBox(height: 8),
+          Text("Posted: ${activity['date']}", style: const TextStyle(color: Colors.grey)),
+          const Divider(height: 40),
+          Text(activity['description'] ?? 'No description.', style: TextStyle(fontSize: 16, color: isDarkMode ? Colors.white70 : Colors.black87)),
+          const SizedBox(height: 30),
+          if (activity['filePath'] != null) Image.file(File(activity['filePath'])),
+        ]),
+      ),
+    );
+  }
 }

@@ -23,9 +23,29 @@ class TeacherPage extends StatefulWidget {
   State<TeacherPage> createState() => _TeacherPageState();
 }
 
-class _TeacherPageState extends State<TeacherPage> {
+class _TeacherPageState extends State<TeacherPage> with SingleTickerProviderStateMixin {
   int selectedIndex = 0;
   bool isSidebarOpen = false;
+
+  late AnimationController _pageController;
+  late Animation<double>   _pageFade;
+  late Animation<Offset>   _pageSlide;
+
+  // ── Design tokens (mirrors admin/guardian) ──────────────────────────────
+  static const Color _primaryBlue  = Color(0xFF2563EB);
+  static const Color _accentIndigo = Color(0xFF4F46E5);
+  static const Color _successGreen = Color(0xFF059669);
+  static const Color _warningAmber = Color(0xFFD97706);
+  static const Color _dangerRed    = Color(0xFFDC2626);
+  static const Color _teal         = Color(0xFF0891B2);
+
+  Color get _surfaceColor  => widget.isDarkMode ? const Color(0xFF1E1E2E) : const Color(0xFFF8FAFC);
+  Color get _cardColor     => widget.isDarkMode ? const Color(0xFF2A2A3E) : Colors.white;
+  Color get _sidebarColor  => widget.isDarkMode ? const Color(0xFF16162A) : const Color(0xFF1E293B);
+  Color get _textPrimary   => widget.isDarkMode ? const Color(0xFFE2E8F0) : const Color(0xFF0F172A);
+  Color get _textSecondary => widget.isDarkMode ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+  Color get _dividerColor  => widget.isDarkMode ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
+  Color get _fieldFill     => widget.isDarkMode ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9);
 
   PlatformFile? _selectedFile;
   List<Map<String, dynamic>> _activities = [];
@@ -104,6 +124,11 @@ class _TeacherPageState extends State<TeacherPage> {
     _phoneController = TextEditingController();
     _advisoryClassController = TextEditingController();
 
+    _pageController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
+    _pageFade  = CurvedAnimation(parent: _pageController, curve: Curves.easeOut);
+    _pageSlide = Tween<Offset>(begin: const Offset(0, 0.04), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _pageController, curve: Curves.easeOutCubic));
+    _pageController.forward();
     _fetchDatabaseContent();
   }
 
@@ -287,6 +312,24 @@ class _TeacherPageState extends State<TeacherPage> {
     return '${activity['title']}_${activity['date']}';
   }
 
+  void _openSidebar() => setState(() => isSidebarOpen = true);
+  void _closeSidebar() => setState(() => isSidebarOpen = false);
+
+  void _showSnackbar(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Row(children: [
+        Icon(isError ? Icons.error_outline_rounded : Icons.check_circle_outline_rounded, color: Colors.white, size: 18),
+        const SizedBox(width: 10),
+        Expanded(child: Text(message, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500))),
+      ]),
+      backgroundColor: isError ? _dangerRed : _successGreen,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.all(16),
+    ));
+  }
+
   @override
   void dispose() {
     for (String student in _gradeControllers.keys) {
@@ -308,181 +351,262 @@ class _TeacherPageState extends State<TeacherPage> {
     _phoneController.dispose();
     _advisoryClassController.dispose();
     _roomTitleController.dispose();
+    _pageController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      resizeToAvoidBottomInset: false,
-      floatingActionButton: null,
-      body: SafeArea(
-        child: Stack(
-          children: [
-            Container(
-              color: widget.isDarkMode ? Colors.grey[900] : Colors.white,
-              child: _buildSection(),
-            ),
-            if (isSidebarOpen)
-              Positioned.fill(
-                child: GestureDetector(
-                  onTap: () => setState(() => isSidebarOpen = false),
-                  child: Container(color: Colors.black26),
-                ),
-              ),
-            AnimatedPositioned(
-              duration: const Duration(milliseconds: 300),
-              left: isSidebarOpen ? 0 : -260,
-              top: 0,
-              bottom: 0,
-              width: 260,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: widget.isDarkMode ? Colors.grey[900] : Colors.white,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      blurRadius: 10,
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 50,
-                      child: Center(
-                        child: IconButton(
-                          icon: const Icon(Icons.menu),
-                          onPressed: () => setState(() => isSidebarOpen = !isSidebarOpen),
-                        ),
-                      ),
-                    ),
-                    const Divider(height: 1),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: menuTitles.length,
-                        itemBuilder: (context, index) {
-                          final selected = index == selectedIndex;
-                          return ListTile(
-                            leading: Icon(menuIcons[index], color: selected ? Colors.blue : null),
-                            title: Text(menuTitles[index],
-                                style: TextStyle(
-                                  fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-                                  color: selected ? Colors.blue : null,
-                                )),
-                            selected: selected,
-                            selectedTileColor: Colors.blue.withOpacity(0.05),
-                            onTap: () {
-                              setState(() {
-                                selectedIndex = index;
-                                isSidebarOpen = false;
-                              });
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                    const Divider(height: 1),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.blue.withOpacity(0.05),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: ListTile(
-                          leading: Icon(widget.isDarkMode ? Icons.light_mode : Icons.dark_mode, color: widget.isDarkMode ? const Color(0xFFFFE082) : Colors.black54),
-                          title: Text(widget.isDarkMode ? "Light Mode" : "Dark Mode", style: TextStyle(color: widget.isDarkMode ? const Color(0xFFFFE082) : null)),
-                          trailing: Switch(
-                            value: widget.isDarkMode,
-                            onChanged: (_) => widget.toggleTheme(),
-                            activeColor: widget.isDarkMode ? const Color(0xFFFFE082) : null,
-                            activeTrackColor: widget.isDarkMode ? const Color(0xFFFFE082).withOpacity(0.4) : null,
-                          ),
-                        ),
-                      ),
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.logout, color: Colors.redAccent),
-                      title: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
-                      onTap: () async {
-                        await ActivityDatabase.instance.close();
-                        if (context.mounted) {
-                          Navigator.pushReplacementNamed(context, '/login');
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 20),
-                  ],
-                ),
-              ),
-            ),
-            if (!isSidebarOpen)
-              Positioned(
-                top: 16,
-                left: 16,
-                child: IconButton(
-                  icon: const Icon(Icons.menu),
-                  onPressed: () => setState(() => isSidebarOpen = true),
-                ),
-              ),
-            // Profile avatar top-right — always visible, sidebar slides from left so no overlap
-            Positioned(
-              top: 7,
-              right: 16,
+      backgroundColor: _surfaceColor,
+      extendBody: true,
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: SafeArea(bottom: false, child: _buildSection()),
+          ),
+          if (isSidebarOpen)
+            Positioned.fill(
               child: GestureDetector(
-                onTap: () => setState(() { selectedIndex = 4; isSidebarOpen = false; }),
-                child: Container(
-                  width: 46,
-                  height: 46,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: widget.isDarkMode ? Colors.white38 : Colors.black,
-                      width: 2.5,
-                    ),
-                    color: widget.isDarkMode ? Colors.grey[800] : Colors.white,
-                  ),
-                  padding: const EdgeInsets.all(3),
-                  child: CircleAvatar(
-                    backgroundColor: Colors.blue,
-                    backgroundImage: _profileImagePath != null
-                        ? FileImage(File(_profileImagePath!))
-                        : null,
-                    child: _profileImagePath == null
-                        ? const Icon(Icons.person, size: 20, color: Colors.white)
-                        : null,
-                  ),
+                onTap: _closeSidebar,
+                child: Container(color: Colors.black.withOpacity(0.5)),
+              ),
+            ),
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOutCubic,
+            left: isSidebarOpen ? 0 : -300,
+            top: 0, bottom: 0, width: 280,
+            child: _buildSidebar(),
+          ),
+          if (!isSidebarOpen)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 8,
+              left: 12,
+              child: _hamburgerButton(),
+            ),
+          // Profile avatar top-right
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 8,
+            right: 12,
+            child: GestureDetector(
+              onTap: () {
+                setState(() { selectedIndex = 4; isSidebarOpen = false; });
+                _triggerPageAnimation();
+              },
+              child: Container(
+                width: 44, height: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _primaryBlue.withOpacity(0.4), width: 2),
+                  color: _cardColor,
+                ),
+                child: ClipOval(
+                  child: _profileImagePath != null
+                      ? Image.file(File(_profileImagePath!), fit: BoxFit.cover)
+                      : Center(child: Text(
+                      (teacherProfile['name'] ?? 'T').toString().isNotEmpty
+                          ? (teacherProfile['name'] ?? 'T').toString()[0].toUpperCase()
+                          : 'T',
+                      style: TextStyle(color: _primaryBlue, fontWeight: FontWeight.bold, fontSize: 18))),
                 ),
               ),
             ),
-          ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _hamburgerButton() {
+    return Material(
+      color: _cardColor,
+      borderRadius: BorderRadius.circular(14),
+      elevation: 0,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: _openSidebar,
+        child: Container(
+          width: 44, height: 44,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _dividerColor, width: 1.5),
+          ),
+          child: Icon(Icons.menu_rounded, color: _textPrimary, size: 20),
         ),
       ),
     );
   }
 
+  Widget _buildSidebar() {
+    final teacherName = (teacherProfile['name'] ?? '').toString();
+    final teacherId = (teacherProfile['teacherId'] ?? '').toString();
+    return Container(
+      decoration: BoxDecoration(
+        color: _sidebarColor,
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 30, offset: const Offset(8, 0))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Container(
+                    width: 44, height: 44,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(colors: [_primaryBlue, _accentIndigo], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: _profileImagePath != null
+                          ? Image.file(File(_profileImagePath!), fit: BoxFit.cover)
+                          : const Icon(Icons.person_4_rounded, color: Colors.white, size: 22),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(teacherName.isEmpty ? 'Teacher' : teacherName,
+                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: -0.3),
+                        overflow: TextOverflow.ellipsis),
+                    Text(teacherId.isEmpty ? 'ID: —' : 'ID: $teacherId',
+                        style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11)),
+                  ])),
+                ]),
+                const SizedBox(height: 24),
+                Text('MENU', style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.5)),
+                const SizedBox(height: 8),
+              ]),
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              itemCount: menuTitles.length,
+              itemBuilder: (context, index) {
+                final selected = index == selectedIndex;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Material(
+                    color: selected ? _primaryBlue.withOpacity(0.15) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () {
+                        setState(() { selectedIndex = index; isSidebarOpen = false; });
+                        _triggerPageAnimation();
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                        child: Row(children: [
+                          Container(
+                            width: 36, height: 36,
+                            decoration: BoxDecoration(
+                              color: selected ? _primaryBlue.withOpacity(0.2) : Colors.white.withOpacity(0.05),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(menuIcons[index],
+                                color: selected ? const Color(0xFF60A5FA) : Colors.white.withOpacity(0.5), size: 18),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(menuTitles[index], style: TextStyle(
+                              color: selected ? const Color(0xFF60A5FA) : Colors.white.withOpacity(0.65),
+                              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                              fontSize: 14)),
+                          if (selected) ...[
+                            const Spacer(),
+                            Container(width: 6, height: 6, decoration: const BoxDecoration(color: Color(0xFF60A5FA), shape: BoxShape.circle)),
+                          ],
+                        ]),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+            child: Divider(color: Colors.white.withOpacity(0.08), height: 1),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + MediaQuery.of(context).padding.bottom),
+              child: Column(children: [
+                _sidebarAction(
+                  icon: widget.isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                  label: widget.isDarkMode ? 'Light Mode' : 'Dark Mode',
+                  trailing: Transform.scale(scale: 0.8, child: Switch(value: widget.isDarkMode, activeColor: const Color(0xFFF59E0B), onChanged: (_) => widget.toggleTheme())),
+                  onTap: widget.toggleTheme,
+                  iconColor: widget.isDarkMode ? const Color(0xFFF59E0B) : Colors.white.withOpacity(0.6),
+                ),
+                const SizedBox(height: 4),
+                _sidebarAction(
+                  icon: Icons.logout_rounded,
+                  label: 'Sign Out',
+                  onTap: () async {
+                    await ActivityDatabase.instance.close();
+                    if (context.mounted) Navigator.pushReplacementNamed(context, '/login');
+                  },
+                  iconColor: _dangerRed,
+                  textColor: _dangerRed,
+                ),
+              ]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sidebarAction({required IconData icon, required String label, required VoidCallback onTap, Widget? trailing, Color? iconColor, Color? textColor}) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          child: Row(children: [
+            Icon(icon, color: iconColor ?? Colors.white.withOpacity(0.6), size: 18),
+            const SizedBox(width: 12),
+            Text(label, style: TextStyle(color: textColor ?? Colors.white.withOpacity(0.65), fontWeight: FontWeight.w400, fontSize: 14)),
+            if (trailing != null) ...[const Spacer(), trailing],
+          ]),
+        ),
+      ),
+    );
+  }
   void _showCreateRoomDialog() {
     _roomTitleController.clear();
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Create Room'),
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Create Room', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.bold)),
         content: TextField(
           controller: _roomTitleController,
           textCapitalization: TextCapitalization.characters,
-          decoration: const InputDecoration(
+          style: TextStyle(color: _textPrimary),
+          decoration: InputDecoration(
             labelText: 'Room Title',
             hintText: 'e.g. GRADE 3 - SECTION A',
-            border: OutlineInputBorder(),
+            filled: true, fillColor: _fieldFill,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _dividerColor)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _dividerColor)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _primaryBlue, width: 1.5)),
           ),
           autofocus: true,
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: _textSecondary))),
           ElevatedButton(
             onPressed: () async {
               final title = _roomTitleController.text.trim();
@@ -490,13 +614,12 @@ class _TeacherPageState extends State<TeacherPage> {
               Navigator.pop(ctx);
               final room = await ActivityDatabase.instance.createRoom(title, widget.loggedInEmail);
               if (room != null) {
-                // Reload from DB to get full row with id
                 final updatedRooms = await ActivityDatabase.instance.getRoomsByTeacher(widget.loggedInEmail);
                 setState(() => _rooms = updatedRooms);
                 if (mounted) _showRoomCodeDialog(room);
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: _primaryBlue, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
             child: const Text('Create'),
           ),
         ],
@@ -545,21 +668,21 @@ class _TeacherPageState extends State<TeacherPage> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Room'),
-        content: Text('Are you sure you want to delete "${r['title']}"? All guardians will be removed from it.'),
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Delete Room', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.bold)),
+        content: Text('Delete "${r['title']}"? All guardians will be removed.', style: TextStyle(color: _textSecondary)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: _textSecondary))),
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(ctx);
               await ActivityDatabase.instance.deleteRoomByCode(r['code']);
               final updatedRooms = await ActivityDatabase.instance.getRoomsByTeacher(widget.loggedInEmail);
               setState(() => _rooms = updatedRooms);
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Room deleted.')));
-              }
+              if (mounted) _showSnackbar('Room deleted');
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: _dangerRed, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
             child: const Text('Delete'),
           ),
         ],
@@ -568,100 +691,102 @@ class _TeacherPageState extends State<TeacherPage> {
   }
 
   Widget _roomsSection() {
-    return Stack(
-      clipBehavior: Clip.none,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(72, 16, 80, 8),
-              child: const Text('Rooms', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            ),
-
-            // Rooms list
-            if (_rooms.isEmpty)
-              Expanded(
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.meeting_room_outlined, size: 64, color: Colors.grey[300]),
-                        const SizedBox(height: 16),
-                        Text('No rooms yet.', style: TextStyle(fontSize: 16, color: Colors.grey[500])),
-                        const SizedBox(height: 8),
-                        Text('Tap the + button to create your first room.', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: Colors.grey[400])),
-                      ],
-                    ),
-                  ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 58, 24, 16),
+          child: Row(children: [
+            Expanded(child: Text('Rooms', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: -0.5, color: _textPrimary))),
+            GestureDetector(
+              onTap: _showCreateRoomDialog,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [_primaryBlue, _accentIndigo], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [BoxShadow(color: _primaryBlue.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))],
                 ),
-              )
-            else
-              Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 80), // bottom padding for FAB
-                  itemCount: _rooms.length,
-                  itemBuilder: (context, index) {
-                    final room = _rooms[index];
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      color: Colors.blue.withOpacity(0.07),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: () => _enterRoom(room),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.add_rounded, color: Colors.white, size: 18),
+                  SizedBox(width: 6),
+                  Text('New Room', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+                ]),
+              ),
+            ),
+          ]),
+        ),
+        Expanded(
+          child: _rooms.isEmpty
+              ? Center(
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Container(padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(color: _dividerColor.withOpacity(0.5), shape: BoxShape.circle),
+                  child: Icon(Icons.meeting_room_outlined, size: 28, color: _textSecondary)),
+              const SizedBox(height: 12),
+              Text('No rooms yet', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.w600, fontSize: 15)),
+              const SizedBox(height: 4),
+              Text('Tap New Room to create your first room.', style: TextStyle(color: _textSecondary, fontSize: 13)),
+            ]),
+          )
+              : ListView.builder(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+            itemCount: _rooms.length,
+            itemBuilder: (context, index) {
+              final room = _rooms[index];
+              final delay = (index * 0.08).clamp(0.0, 0.6);
+              final itemAnim = CurvedAnimation(
+                parent: _pageController,
+                curve: Interval(delay, (delay + 0.5).clamp(0.0, 1.0), curve: Curves.easeOut),
+              );
+              return AnimatedBuilder(
+                  animation: _pageController,
+                  builder: (context, child) => Opacity(
+                    opacity: itemAnim.value,
+                    child: Transform.translate(offset: Offset(0, 20 * (1 - itemAnim.value)), child: child),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: GestureDetector(
+                      onTap: () => _enterRoom(room),
+                      child: Container(
+                        decoration: BoxDecoration(color: _cardColor, borderRadius: BorderRadius.circular(16), border: Border.all(color: _dividerColor)),
                         child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.meeting_room, color: Colors.blue, size: 36),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(room['title'] ?? '', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Code: ${room['code'] ?? ''}',
-                                      style: const TextStyle(fontSize: 14, color: Colors.blue, fontWeight: FontWeight.w600, letterSpacing: 2),
-                                    ),
-                                  ],
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          child: Row(children: [
+                            Container(width: 44, height: 44,
+                                decoration: BoxDecoration(color: _teal.withOpacity(0.1), borderRadius: BorderRadius.circular(13)),
+                                child: const Icon(Icons.meeting_room_rounded, color: _teal, size: 22)),
+                            const SizedBox(width: 13),
+                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text(room['title'] ?? '', style: TextStyle(color: _textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 3),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(color: _teal.withOpacity(0.08), borderRadius: BorderRadius.circular(6)),
+                                child: Text('Code: ${room['code'] ?? ''}',
+                                    style: TextStyle(fontSize: 12, color: _teal, fontWeight: FontWeight.w700, letterSpacing: 2)),
+                              ),
+                            ])),
+                            GestureDetector(
+                              onTap: () {},
+                              child: GestureDetector(
+                                onTap: () => _showDeleteRoomDialog(room),
+                                child: Container(
+                                  width: 36, height: 36,
+                                  decoration: BoxDecoration(color: _dangerRed.withOpacity(0.08), borderRadius: BorderRadius.circular(10)),
+                                  child: Icon(Icons.delete_outline_rounded, color: _dangerRed, size: 18),
                                 ),
                               ),
-                              // Use GestureDetector to stop tap from propagating to InkWell
-                              GestureDetector(
-                                onTap: () {}, // absorb tap
-                                child: IconButton(
-                                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                                  tooltip: 'Delete room',
-                                  onPressed: () => _showDeleteRoomDialog(room),
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(Icons.chevron_right_rounded, color: _textSecondary, size: 20),
+                          ]),
                         ),
                       ),
-                    );
-                  },
-                ),
-              ),
-          ],
-        ),
-
-        // + FAB bottom-right
-        Positioned(
-          bottom: 24,
-          right: 24,
-          child: FloatingActionButton.extended(
-            heroTag: 'createRoomFAB',
-            onPressed: _showCreateRoomDialog,
-            backgroundColor: Colors.blue,
-            foregroundColor: Colors.white,
-            icon: const Icon(Icons.add),
-            label: const Text('New Room'),
+                    ),
+                  ));
+            },
           ),
         ),
       ],
@@ -1150,17 +1275,29 @@ class _TeacherPageState extends State<TeacherPage> {
     );
   }
 
+  void _triggerPageAnimation() {
+    _pageController.forward(from: 0.0);
+  }
+
   Widget _buildSection() {
+    Widget section;
     switch (selectedIndex) {
       case 0:
-        return _roomsSection();
+        section = _roomsSection();
+        break;
       case 1:
-        return _attendanceSection();
-      case 4: // Profile accessed via avatar tap
-        return _genericSection('Teacher Profile', _profileContent());
+        section = _attendanceSection();
+        break;
+      case 4:
+        section = _genericSection('Teacher Profile', _profileContent());
+        break;
       default:
-        return const SizedBox();
+        section = const SizedBox();
     }
+    return FadeTransition(
+      opacity: _pageFade,
+      child: SlideTransition(position: _pageSlide, child: section),
+    );
   }
 
   Widget _genericSection(String title, Widget content) {

@@ -28,6 +28,22 @@ class _GuardianPageState extends State<GuardianPage> {
   bool isLoading = true;
   bool isEditing = false;
 
+  // ── Design tokens (mirrors admin_page) ──────────────────────────────────
+  static const Color _primaryBlue  = Color(0xFF2563EB);
+  static const Color _accentIndigo = Color(0xFF4F46E5);
+  static const Color _successGreen = Color(0xFF059669);
+  static const Color _warningAmber = Color(0xFFD97706);
+  static const Color _dangerRed    = Color(0xFFDC2626);
+  static const Color _teal         = Color(0xFF0891B2);
+
+  Color get _surfaceColor  => widget.isDarkMode ? const Color(0xFF1E1E2E) : const Color(0xFFF8FAFC);
+  Color get _cardColor     => widget.isDarkMode ? const Color(0xFF2A2A3E) : Colors.white;
+  Color get _sidebarColor  => widget.isDarkMode ? const Color(0xFF16162A) : const Color(0xFF1E293B);
+  Color get _textPrimary   => widget.isDarkMode ? const Color(0xFFE2E8F0) : const Color(0xFF0F172A);
+  Color get _textSecondary => widget.isDarkMode ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+  Color get _dividerColor  => widget.isDarkMode ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
+  Color get _fieldFill     => widget.isDarkMode ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9);
+
   late TextEditingController _lrnController;
   List<Map<String, dynamic>> linkedStudents = [];
   bool isLinking = false;
@@ -378,86 +394,247 @@ class _GuardianPageState extends State<GuardianPage> {
       setState(() => linkedStudents = links);
 
       _lrnController.clear();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${_formatFullName(student)} linked!'), backgroundColor: Colors.green),
-      );
+      _showSnackbar('${_formatFullName(student)} linked!');
     } catch (e) {
       debugPrint('Link error: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Link failed: $e'), backgroundColor: Colors.red),
-      );
+      _showSnackbar('Link failed: $e', isError: true);
     } finally {
       if (mounted) setState(() => isLinking = false);
     }
   }
 
+  void _openSidebar() => setState(() => isSidebarOpen = true);
+  void _closeSidebar() => setState(() => isSidebarOpen = false);
+
+  void _showSnackbar(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Row(children: [
+        Icon(isError ? Icons.error_outline_rounded : Icons.check_circle_outline_rounded, color: Colors.white, size: 18),
+        const SizedBox(width: 10),
+        Expanded(child: Text(message, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500))),
+      ]),
+      backgroundColor: isError ? _dangerRed : _successGreen,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.all(16),
+    ));
+  }
+
+  InputDecoration _inputDecoration(String hint, IconData icon, {Widget? suffixIcon}) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(color: _textSecondary, fontSize: 14),
+      prefixIcon: Icon(icon, color: _textSecondary, size: 20),
+      suffixIcon: suffixIcon,
+      filled: true,
+      fillColor: _fieldFill,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _dividerColor)),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _dividerColor)),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: _primaryBlue, width: 1.5)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      resizeToAvoidBottomInset: true,
-      body: SafeArea(
-        child: Stack(
-          children: [
-            Container(color: widget.isDarkMode ? Colors.grey[900] : Colors.white, child: _buildSection()),
-            if (isSidebarOpen) Positioned.fill(child: GestureDetector(onTap: () => setState(() => isSidebarOpen = false), child: Container(color: Colors.black26))),
-            _buildSidebar(),
-            if (!isSidebarOpen) Positioned(top: 16, left: 16, child: IconButton(icon: Icon(Icons.menu, color: widget.isDarkMode ? Colors.white : Colors.black), onPressed: () => setState(() => isSidebarOpen = true))),
-          ],
+      backgroundColor: _surfaceColor,
+      extendBody: true,
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: SafeArea(bottom: false, child: _buildSection()),
+          ),
+          if (isSidebarOpen)
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: _closeSidebar,
+                child: Container(color: Colors.black.withOpacity(0.5)),
+              ),
+            ),
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOutCubic,
+            left: isSidebarOpen ? 0 : -300,
+            top: 0, bottom: 0, width: 280,
+            child: _buildSidebar(),
+          ),
+          if (!isSidebarOpen)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 8,
+              left: 12,
+              child: _hamburgerButton(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _hamburgerButton() {
+    return Material(
+      color: _cardColor,
+      borderRadius: BorderRadius.circular(14),
+      elevation: 0,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: _openSidebar,
+        child: Container(
+          width: 44, height: 44,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _dividerColor, width: 1.5),
+          ),
+          child: Icon(Icons.menu_rounded, color: _textPrimary, size: 20),
         ),
       ),
     );
   }
 
   Widget _buildSidebar() {
-    return AnimatedPositioned(
-      duration: const Duration(milliseconds: 300),
-      left: isSidebarOpen ? 0 : -260,
-      top: 0, bottom: 0, width: 260,
-      child: Container(
-        decoration: BoxDecoration(color: widget.isDarkMode ? Colors.grey[900] : Colors.white, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10)]),
-        child: Column(
-          children: [
-            const SizedBox(height: 12),
-            IconButton(icon: Icon(Icons.menu, color: widget.isDarkMode ? Colors.white : Colors.black), onPressed: () => setState(() => isSidebarOpen = !isSidebarOpen)),
-            const SizedBox(height: 20),
-            const CircleAvatar(radius: 40, backgroundColor: Colors.blueAccent, child: Icon(Icons.person, size: 40, color: Colors.white)),
-            const SizedBox(height: 12),
-            Text(_getFullName, textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: widget.isDarkMode ? Colors.white : Colors.black)),
-            Text("Account ID: ${_formattedAccountId}", style: const TextStyle(color: Colors.grey, fontSize: 12)),
-            const SizedBox(height: 30),
-            Expanded(child: ListView.builder(itemCount: menuTitles.length, itemBuilder: (context, index) {
-              final selected = index == selectedIndex;
-              return ListTile(
-                leading: Icon(menuIcons[index], color: selected ? Colors.blue : (widget.isDarkMode ? Colors.white70 : Colors.black54)),
-                title: Text(menuTitles[index], style: TextStyle(fontWeight: selected ? FontWeight.bold : FontWeight.normal, color: selected ? Colors.blue : (widget.isDarkMode ? Colors.white : Colors.black))),
-                onTap: () => setState(() { selectedIndex = index; isSidebarOpen = false; }),
-              );
-            })),
-            ListTile(
-              leading: Icon(widget.isDarkMode ? Icons.light_mode : Icons.dark_mode, color: widget.isDarkMode ? const Color(0xFFFFE082) : Colors.black54),
-              title: Text(widget.isDarkMode ? 'Light Mode' : 'Dark Mode', style: TextStyle(color: widget.isDarkMode ? const Color(0xFFFFE082) : null)),
-              trailing: Switch(
-                value: widget.isDarkMode,
-                onChanged: (_) => widget.toggleTheme(),
-                activeColor: widget.isDarkMode ? const Color(0xFFFFE082) : null,
-                activeTrackColor: widget.isDarkMode ? const Color(0xFFFFE082).withOpacity(0.4) : null,
+    return Container(
+      decoration: BoxDecoration(
+        color: _sidebarColor,
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 30, offset: const Offset(8, 0))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Container(
+                      width: 44, height: 44,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(colors: [_primaryBlue, _accentIndigo], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(Icons.family_restroom_rounded, color: Colors.white, size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(_getFullName.isEmpty ? 'Guardian' : _getFullName,
+                          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: -0.3),
+                          overflow: TextOverflow.ellipsis),
+                      Text('ID: ${_formattedAccountId}',
+                          style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11)),
+                    ])),
+                  ]),
+                  const SizedBox(height: 24),
+                  Text('MENU', style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.5)),
+                  const SizedBox(height: 8),
+                ],
               ),
             ),
-            ListTile(leading: const Icon(Icons.logout, color: Colors.redAccent), title: const Text('Logout', style: TextStyle(color: Colors.redAccent)), onTap: () => Navigator.pushReplacementNamed(context, '/login')),
-            const SizedBox(height: 20),
-          ],
+          ),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              itemCount: menuTitles.length,
+              itemBuilder: (context, index) {
+                final selected = index == selectedIndex;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Material(
+                    color: selected ? _primaryBlue.withOpacity(0.15) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => setState(() { selectedIndex = index; isSidebarOpen = false; }),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                        child: Row(children: [
+                          Container(
+                            width: 36, height: 36,
+                            decoration: BoxDecoration(
+                              color: selected ? _primaryBlue.withOpacity(0.2) : Colors.white.withOpacity(0.05),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(menuIcons[index],
+                                color: selected ? const Color(0xFF60A5FA) : Colors.white.withOpacity(0.5), size: 18),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(menuTitles[index],
+                              style: TextStyle(
+                                  color: selected ? const Color(0xFF60A5FA) : Colors.white.withOpacity(0.65),
+                                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                                  fontSize: 14)),
+                          if (selected) ...[
+                            const Spacer(),
+                            Container(width: 6, height: 6, decoration: const BoxDecoration(color: Color(0xFF60A5FA), shape: BoxShape.circle)),
+                          ],
+                        ]),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+            child: Divider(color: Colors.white.withOpacity(0.08), height: 1),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + MediaQuery.of(context).padding.bottom),
+              child: Column(children: [
+                _sidebarAction(
+                  icon: widget.isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                  label: widget.isDarkMode ? 'Light Mode' : 'Dark Mode',
+                  trailing: Transform.scale(scale: 0.8, child: Switch(value: widget.isDarkMode, activeColor: const Color(0xFFF59E0B), onChanged: (_) => widget.toggleTheme())),
+                  onTap: widget.toggleTheme,
+                  iconColor: widget.isDarkMode ? const Color(0xFFF59E0B) : Colors.white.withOpacity(0.6),
+                ),
+                const SizedBox(height: 4),
+                _sidebarAction(
+                  icon: Icons.logout_rounded,
+                  label: 'Sign Out',
+                  onTap: () => Navigator.pushReplacementNamed(context, '/login'),
+                  iconColor: _dangerRed,
+                  textColor: _dangerRed,
+                ),
+              ]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sidebarAction({required IconData icon, required String label, required VoidCallback onTap, Widget? trailing, Color? iconColor, Color? textColor}) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          child: Row(children: [
+            Icon(icon, color: iconColor ?? Colors.white.withOpacity(0.6), size: 18),
+            const SizedBox(width: 12),
+            Text(label, style: TextStyle(color: textColor ?? Colors.white.withOpacity(0.65), fontWeight: FontWeight.w400, fontSize: 14)),
+            if (trailing != null) ...[const Spacer(), trailing],
+          ]),
         ),
       ),
     );
   }
 
   Widget _buildSection() {
-    if (isLoading) return const Center(child: CircularProgressIndicator());
+    if (isLoading) return Center(child: CircularProgressIndicator(color: _primaryBlue));
     switch (selectedIndex) {
       case 0: return _roomsSection();
       case 1: return _studentGradesSection();
       case 2: return _attendanceSection();
-      case 3: return _genericSection('Guardian Profile', _profileContent());
+      case 3: return _genericSection('Profile', _profileContent());
       default: return const SizedBox();
     }
   }
@@ -466,7 +643,10 @@ class _GuardianPageState extends State<GuardianPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(padding: const EdgeInsets.fromLTRB(72, 22, 24, 20), child: Text(title, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: widget.isDarkMode ? Colors.white : Colors.black))),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 58, 24, 16),
+          child: Text(title, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: -0.5, color: _textPrimary)),
+        ),
         Expanded(child: content),
       ],
     );
@@ -479,50 +659,102 @@ class _GuardianPageState extends State<GuardianPage> {
 
     return SingleChildScrollView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      padding: EdgeInsets.only(left: 24, right: 24, top: 24, bottom: bottomInset > 0 ? bottomInset + 80 : 24),
-      child: Column(
-        children: [
-          const CircleAvatar(radius: 50, backgroundColor: Colors.blue, child: Icon(Icons.person, size: 50, color: Colors.white)),
-          const SizedBox(height: 24),
-          _buildProfileField('Account ID', _formattedAccountId, isEditable: false),
-          _buildProfileField('Full Name', fullName, isEditable: false),
-          _buildProfileField('Email Address', email, isEditable: false),
-          _buildProfileField('Phone Number', _profileData['phone']?.isNotEmpty == true ? '+63 ${_profileData['phone']}' : 'Not set',
-            controller: _phoneController, isEditing: isEditing,
-            hint: '9XX XXXX XXXX', keyboardType: TextInputType.phone,
-            formatters: [PhoneNumberFormatter()],
-            prefix: '+63 ',
+      padding: EdgeInsets.only(left: 20, right: 20, top: 8, bottom: bottomInset > 0 ? bottomInset + 80 : 24),
+      child: Column(children: [
+        // Avatar
+        Container(
+          width: 80, height: 80,
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(colors: [_primaryBlue, _accentIndigo], begin: Alignment.topLeft, end: Alignment.bottomRight),
+            shape: BoxShape.circle,
           ),
-          const SizedBox(height: 30),
-          SizedBox(
-            width: double.infinity, height: 50,
-            child: ElevatedButton.icon(
-              onPressed: () async {
-                if (isEditing) {
-                  // Save: strip any non-digit chars, store raw digits after +63
-                  final raw = _phoneController.text.replaceAll(RegExp(r'[^\d]'), '');
-                  setState(() { _profileData['phone'] = raw; isEditing = false; });
-                  await _updateProfileInDatabase();
-                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated successfully')));
-                } else {
-                  // Pre-fill controller with existing digits (without +63)
-                  final existing = (_profileData['phone'] ?? '').toString().replaceAll(RegExp(r'[^\d]'), '');
-                  _phoneController.text = existing.isEmpty ? '9' : existing;
-                  setState(() => isEditing = true);
-                }
-              },
-              icon: Icon(isEditing ? Icons.save : Icons.edit),
-              label: Text(isEditing ? 'Save Profile' : 'Edit Profile'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: isEditing ? Colors.green : Colors.blue,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Center(child: Text(fullName.isNotEmpty ? fullName[0].toUpperCase() : 'G',
+              style: const TextStyle(color: Colors.white, fontSize: 30, fontWeight: FontWeight.bold))),
+        ),
+        const SizedBox(height: 8),
+        Text(fullName, style: TextStyle(color: _textPrimary, fontSize: 17, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 2),
+        Text(email, style: TextStyle(color: _textSecondary, fontSize: 13)),
+        const SizedBox(height: 24),
+
+        // Info card
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(color: _cardColor, borderRadius: BorderRadius.circular(20), border: Border.all(color: _dividerColor)),
+          child: Column(children: [
+            _profileRow('Account ID', _formattedAccountId, Icons.badge_rounded),
+            Divider(color: _dividerColor, height: 24),
+            _profileRow('Full Name', fullName.isEmpty ? 'Not set' : fullName, Icons.person_rounded),
+            Divider(color: _dividerColor, height: 24),
+            _profileRow('Email', email, Icons.email_outlined),
+            Divider(color: _dividerColor, height: 24),
+            isEditing
+                ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Phone Number', style: TextStyle(color: _textSecondary, fontSize: 12, fontWeight: FontWeight.w500)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _phoneController,
+                keyboardType: TextInputType.phone,
+                inputFormatters: [PhoneNumberFormatter()],
+                style: TextStyle(color: _textPrimary, fontSize: 14),
+                decoration: _inputDecoration('9XX XXXX XXXX', Icons.phone_rounded).copyWith(prefixText: '+63 '),
               ),
+            ])
+                : _profileRow('Phone Number',
+                _profileData['phone']?.isNotEmpty == true ? '+63 ${_profileData['phone']}' : 'Not set',
+                Icons.phone_rounded),
+          ]),
+        ),
+        const SizedBox(height: 20),
+
+        // Edit / Save button
+        GestureDetector(
+          onTap: () async {
+            if (isEditing) {
+              final raw = _phoneController.text.replaceAll(RegExp(r'[^\d]'), '');
+              setState(() { _profileData['phone'] = raw; isEditing = false; });
+              await _updateProfileInDatabase();
+              if (mounted) _showSnackbar('Profile updated');
+            } else {
+              final existing = (_profileData['phone'] ?? '').toString().replaceAll(RegExp(r'[^\d]'), '');
+              _phoneController.text = existing.isEmpty ? '9' : existing;
+              setState(() => isEditing = true);
+            }
+          },
+          child: Container(
+            width: double.infinity, height: 50,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: isEditing ? [_successGreen, const Color(0xFF047857)] : [_primaryBlue, _accentIndigo],
+                begin: Alignment.topLeft, end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [BoxShadow(color: (isEditing ? _successGreen : _primaryBlue).withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))],
             ),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(isEditing ? Icons.save_rounded : Icons.edit_rounded, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Text(isEditing ? 'Save Profile' : 'Edit Profile',
+                  style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+            ]),
           ),
-        ],
-      ),
+        ),
+      ]),
     );
+  }
+
+  Widget _profileRow(String label, String value, IconData icon) {
+    return Row(children: [
+      Container(width: 36, height: 36,
+          decoration: BoxDecoration(color: _primaryBlue.withOpacity(0.08), borderRadius: BorderRadius.circular(10)),
+          child: Icon(icon, color: _primaryBlue, size: 18)),
+      const SizedBox(width: 12),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: TextStyle(color: _textSecondary, fontSize: 11, fontWeight: FontWeight.w500)),
+        const SizedBox(height: 2),
+        Text(value, style: TextStyle(color: _textPrimary, fontSize: 14, fontWeight: FontWeight.w500)),
+      ])),
+    ]);
   }
 
   Widget _buildProfileField(String label, String value, {
@@ -532,35 +764,34 @@ class _GuardianPageState extends State<GuardianPage> {
   }) {
     final bool showInput = isEditing && isEditable;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 14, fontWeight: FontWeight.w500)),
-          const SizedBox(height: 8),
-          if (showInput)
-            TextField(
-              controller: controller, keyboardType: keyboardType, inputFormatters: formatters,
-              decoration: InputDecoration(
-                hintText: hint,
-                prefixText: prefix,
-                prefixStyle: const TextStyle(fontWeight: FontWeight.w500),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-              ),
-            )
-          else
-            Container(
-              width: double.infinity, padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: isEditable ? (widget.isDarkMode ? Colors.grey[800] : Colors.grey[100]) : (widget.isDarkMode ? Colors.grey[850] : Colors.grey[200]),
-                borderRadius: BorderRadius.circular(8),
-                border: isEditable ? null : Border.all(color: Colors.grey[400]!, width: 0.5),
-              ),
-              child: Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: isEditable ? (widget.isDarkMode ? Colors.white : Colors.black87) : Colors.grey[600])),
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: TextStyle(color: _textSecondary, fontSize: 12, fontWeight: FontWeight.w500)),
+        const SizedBox(height: 6),
+        if (showInput)
+          TextField(
+            controller: controller, keyboardType: keyboardType, inputFormatters: formatters,
+            style: TextStyle(color: _textPrimary, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: hint, prefixText: prefix,
+              filled: true, fillColor: _fieldFill,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _dividerColor)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _dividerColor)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _primaryBlue, width: 1.5)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
             ),
-        ],
-      ),
+          )
+        else
+          Container(
+            width: double.infinity, padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: isEditable ? _fieldFill : _dividerColor.withOpacity(0.5),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _dividerColor),
+            ),
+            child: Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: isEditable ? _textPrimary : _textSecondary)),
+          ),
+      ]),
     );
   }
 
@@ -568,137 +799,166 @@ class _GuardianPageState extends State<GuardianPage> {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.meeting_room_outlined, size: 64, color: Colors.grey[400]),
-            const SizedBox(height: 16),
-            Text('No room joined yet', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey[600])),
-            const SizedBox(height: 8),
-            Text('Go to "Rooms" and enter the room code given by your teacher.', textAlign: TextAlign.center, style: TextStyle(fontSize: 14, color: Colors.grey[500])),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () => setState(() => selectedIndex = 0),
-              icon: const Icon(Icons.meeting_room_outlined),
-              label: const Text('Go to Rooms'),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(color: _dividerColor.withOpacity(0.5), shape: BoxShape.circle),
+            child: Icon(Icons.meeting_room_outlined, size: 32, color: _textSecondary),
+          ),
+          const SizedBox(height: 16),
+          Text('No room joined yet', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.w600, fontSize: 16)),
+          const SizedBox(height: 6),
+          Text('Enter the room code from your teacher to join.', textAlign: TextAlign.center, style: TextStyle(color: _textSecondary, fontSize: 13)),
+          const SizedBox(height: 24),
+          GestureDetector(
+            onTap: () => setState(() => selectedIndex = 0),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [_primaryBlue, _accentIndigo], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Text('Go to Rooms', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
             ),
-          ],
-        ),
+          ),
+        ]),
       ),
     );
   }
 
   Widget _roomsSection() {
-    return _genericSection('Rooms', RefreshIndicator(
-      onRefresh: _fetchDatabaseData,
-      child: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        children: [
-          const SizedBox(height: 16),
-          // Join a new room
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: widget.isDarkMode ? Colors.grey[850] : Colors.grey[100],
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Join a Room', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Row(children: [
-                Expanded(
-                  child: TextField(
-                    controller: _roomCodeController,
-                    textCapitalization: TextCapitalization.characters,
-                    maxLength: 6,
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 4),
-                    textAlign: TextAlign.center,
-                    decoration: InputDecoration(
-                      hintText: 'XXXXXX',
-                      hintStyle: TextStyle(color: Colors.grey[400], letterSpacing: 4),
-                      filled: true,
-                      fillColor: widget.isDarkMode ? Colors.grey[800] : Colors.white,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                      counterText: '',
-                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                ElevatedButton(
-                  onPressed: isLinking ? null : _joinRoom,
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16)),
-                  child: isLinking
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Text('Join'),
-                ),
-              ]),
-            ]),
-          ),
-          const SizedBox(height: 20),
-          if (_joinedRooms.isEmpty)
-            Center(child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Column(children: [
-                Icon(Icons.meeting_room_outlined, size: 64, color: Colors.grey[300]),
-                const SizedBox(height: 12),
-                Text('No rooms joined yet.', style: TextStyle(color: Colors.grey[500], fontSize: 16)),
-                const SizedBox(height: 8),
-                Text('Enter a room code above to join your teacher\'s room.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[400], fontSize: 13)),
-              ]),
-            ))
-          else
-            ...(_joinedRooms.map((room) {
-              final roomCode = room['code'].toString();
-              final roomActivities = _activities.where((a) => a['roomCode'] == roomCode).toList();
-              final roomAnnouncements = _announcements.where((a) => a['roomCode'] == roomCode).toList();
-              return Card(
-                margin: const EdgeInsets.only(bottom: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                color: Colors.blue.withOpacity(0.07),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: () => Navigator.push(context, MaterialPageRoute(
-                    builder: (_) => GuardianRoomDetailPage(
-                      room: room,
-                      activities: roomActivities,
-                      announcements: roomAnnouncements,
-                      studentGrades: _studentGrades,
-                      linkedStudents: linkedStudents,
-                      isDarkMode: widget.isDarkMode,
-                    ),
-                  )),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(children: [
-                      const Icon(Icons.meeting_room, color: Colors.blue, size: 36),
-                      const SizedBox(width: 14),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(room['title'] ?? '', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 4),
-                        Text('${roomActivities.length} activities • ${roomAnnouncements.length} announcements', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                      ])),
-                      // Leave button
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 58, 24, 16),
+          child: Text('Rooms', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: -0.5, color: _textPrimary)),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _fetchDatabaseData,
+            color: _primaryBlue,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(color: _cardColor, borderRadius: BorderRadius.circular(20), border: Border.all(color: _dividerColor)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Container(width: 28, height: 28,
+                          decoration: BoxDecoration(color: _primaryBlue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                          child: Icon(Icons.add_rounded, color: _primaryBlue, size: 16)),
+                      const SizedBox(width: 8),
+                      Text('Join a Room', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.w600, fontSize: 14)),
+                    ]),
+                    const SizedBox(height: 14),
+                    Row(children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _roomCodeController,
+                          textCapitalization: TextCapitalization.characters,
+                          maxLength: 6,
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 6, color: _textPrimary),
+                          textAlign: TextAlign.center,
+                          decoration: InputDecoration(
+                            hintText: 'XXXXXX',
+                            hintStyle: TextStyle(color: _textSecondary, letterSpacing: 4, fontSize: 16),
+                            filled: true, fillColor: _fieldFill,
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _dividerColor)),
+                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _dividerColor)),
+                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: _primaryBlue, width: 1.5)),
+                            counterText: '',
+                            contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
                       GestureDetector(
-                        onTap: () => _leaveSpecificRoom(room),
+                        onTap: isLinking ? null : _joinRoom,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(border: Border.all(color: Colors.redAccent), borderRadius: BorderRadius.circular(8)),
-                          child: const Text('Leave', style: TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.w600)),
+                          height: 52, padding: const EdgeInsets.symmetric(horizontal: 20),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(colors: [_primaryBlue, _accentIndigo], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: [BoxShadow(color: _primaryBlue.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))],
+                          ),
+                          child: Center(
+                            child: isLinking
+                                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                : const Text('Join', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
+                          ),
                         ),
                       ),
                     ]),
-                  ),
+                  ]),
                 ),
-              );
-            })).toList(),
-          const SizedBox(height: 80),
-        ],
-      ),
-    ));
+                const SizedBox(height: 20),
+                if (_joinedRooms.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 32),
+                    child: Column(children: [
+                      Container(padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(color: _dividerColor.withOpacity(0.5), shape: BoxShape.circle),
+                          child: Icon(Icons.meeting_room_outlined, size: 28, color: _textSecondary)),
+                      const SizedBox(height: 12),
+                      Text('No rooms joined yet', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.w600, fontSize: 15)),
+                      const SizedBox(height: 4),
+                      Text('Enter a room code above to join.', style: TextStyle(color: _textSecondary, fontSize: 13)),
+                    ]),
+                  )
+                else
+                  ...(_joinedRooms.map((room) {
+                    final roomCode = room['code'].toString();
+                    final roomActivities = _activities.where((a) => a['roomCode'] == roomCode).toList();
+                    final roomAnnouncements = _announcements.where((a) => a['roomCode'] == roomCode).toList();
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: GestureDetector(
+                        onTap: () => Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => GuardianRoomDetailPage(
+                            room: room, activities: roomActivities, announcements: roomAnnouncements,
+                            studentGrades: _studentGrades, linkedStudents: linkedStudents, isDarkMode: widget.isDarkMode,
+                          ),
+                        )),
+                        child: Container(
+                          decoration: BoxDecoration(color: _cardColor, borderRadius: BorderRadius.circular(16), border: Border.all(color: _dividerColor)),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                            child: Row(children: [
+                              Container(width: 44, height: 44,
+                                  decoration: BoxDecoration(color: _teal.withOpacity(0.1), borderRadius: BorderRadius.circular(13)),
+                                  child: const Icon(Icons.meeting_room_rounded, color: _teal, size: 22)),
+                              const SizedBox(width: 13),
+                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(room['title'] ?? '', style: TextStyle(color: _textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
+                                const SizedBox(height: 3),
+                                Text('${roomActivities.length} activities  ·  ${roomAnnouncements.length} announcements',
+                                    style: TextStyle(color: _textSecondary, fontSize: 12)),
+                              ])),
+                              GestureDetector(
+                                onTap: () => _leaveSpecificRoom(room),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(color: _dangerRed.withOpacity(0.08), borderRadius: BorderRadius.circular(10), border: Border.all(color: _dangerRed.withOpacity(0.3))),
+                                  child: Text('Leave', style: TextStyle(color: _dangerRed, fontSize: 12, fontWeight: FontWeight.w600)),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Icon(Icons.chevron_right_rounded, color: _textSecondary, size: 20),
+                            ]),
+                          ),
+                        ),
+                      ),
+                    );
+                  })).toList(),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
   }
-
   Future<void> _joinRoom() async {
     final code = _roomCodeController.text.trim().toUpperCase();
     if (code.length != 6) {
@@ -801,9 +1061,9 @@ class _GuardianPageState extends State<GuardianPage> {
             margin: const EdgeInsets.only(bottom: 20),
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: Colors.blue.withOpacity(0.07),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.blue.withOpacity(0.2)),
+              color: _cardColor,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _dividerColor),
             ),
             child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
               _attendanceStat('Total', totalAll.toString(), Colors.blue),
@@ -832,13 +1092,13 @@ class _GuardianPageState extends State<GuardianPage> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: Colors.blue.withOpacity(0.1),
+                    color: _teal.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Row(children: [
-                    const Icon(Icons.meeting_room, size: 16, color: Colors.blue),
+                    Icon(Icons.meeting_room_rounded, size: 16, color: _teal),
                     const SizedBox(width: 8),
-                    Text(roomTitle, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Colors.blue)),
+                    Text(roomTitle, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: _teal)),
                   ]),
                 ),
                 const SizedBox(height: 10),
@@ -856,9 +1116,9 @@ class _GuardianPageState extends State<GuardianPage> {
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     decoration: BoxDecoration(
-                      border: Border.all(color: widget.isDarkMode ? Colors.grey.shade700 : Colors.grey.shade200),
-                      borderRadius: BorderRadius.circular(10),
-                      color: widget.isDarkMode ? Colors.grey[850] : Colors.white,
+                      border: Border.all(color: _dividerColor),
+                      borderRadius: BorderRadius.circular(12),
+                      color: _cardColor,
                     ),
                     child: Row(children: [
                       Icon(Icons.calendar_today, size: 16, color: Colors.grey[500]),
@@ -891,7 +1151,7 @@ class _GuardianPageState extends State<GuardianPage> {
     return Column(children: [
       Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color)),
       const SizedBox(height: 2),
-      Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+      Text(label, style: TextStyle(fontSize: 11, color: _textSecondary)),
     ]);
   }
 
@@ -984,9 +1244,9 @@ class _GuardianPageState extends State<GuardianPage> {
                         margin: const EdgeInsets.only(bottom: 8),
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         decoration: BoxDecoration(
-                          border: Border.all(color: widget.isDarkMode ? Colors.grey.shade700 : Colors.grey.shade200),
-                          borderRadius: BorderRadius.circular(8),
-                          color: widget.isDarkMode ? Colors.grey[850] : Colors.grey[50],
+                          border: Border.all(color: _dividerColor),
+                          borderRadius: BorderRadius.circular(10),
+                          color: _cardColor,
                         ),
                         child: Row(children: [
                           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

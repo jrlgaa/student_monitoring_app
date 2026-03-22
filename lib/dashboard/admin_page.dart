@@ -1556,12 +1556,12 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
   void _showEditUserModal(Map<String, dynamic> user) {
     final fName = TextEditingController(text: user['firstName']);
     final lName = TextEditingController(text: user['lastName']);
+    final password = TextEditingController();
 
     final bool isTeacher = user['role'] == 'Teacher';
     final bool isGuardian = user['role'] == 'Guardian';
     final String existingEmail = user['email'] ?? '';
 
-    // Extract local part for teacher (@deped.gov.ph) or guardian (@gmail.com)
     final String existingLocal = isTeacher && existingEmail.endsWith('@deped.gov.ph')
         ? existingEmail.replaceAll('@deped.gov.ph', '')
         : isGuardian && existingEmail.endsWith('@gmail.com')
@@ -1570,91 +1570,121 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
     final emailLocal = TextEditingController(text: existingLocal);
     final email = TextEditingController(text: existingEmail);
 
+    bool obscurePassword = true;
+
     showDialog(
         context: context,
-        builder: (context) => _formDialog(
-            title: 'Edit ${user['role']}',
-            saveLabel: 'Update',
-            onSave: () async {
-              final local = emailLocal.text.trim();
-              if ((isTeacher || isGuardian) && local.isEmpty) {
-                _showSnackbar('Email username cannot be empty', isError: true);
-                return;
-              }
+        builder: (context) => StatefulBuilder(
+            builder: (context, setDialogState) => _formDialog(
+                title: 'Edit ${user['role']}',
+                saveLabel: 'Update',
+                onSave: () async {
+                  final local = emailLocal.text.trim();
+                  if ((isTeacher || isGuardian) && local.isEmpty) {
+                    _showSnackbar('Email username cannot be empty', isError: true);
+                    return;
+                  }
 
-              final String finalEmail = isTeacher
-                  ? '${local}@deped.gov.ph'
-                  : isGuardian
-                  ? '${local}@gmail.com'
-                  : email.text.trim();
+                  final String finalEmail = isTeacher
+                      ? '${local}@deped.gov.ph'
+                      : isGuardian
+                      ? '${local}@gmail.com'
+                      : email.text.trim();
 
-              await DatabaseHelper.instance.updateUser(user['id'], {
-                'firstName': fName.text.trim(),
-                'lastName': lName.text.trim(),
-                'email': finalEmail,
-              });
-              _refreshData();
-              Navigator.pop(context);
-              _showSnackbar('${user['role']} updated');
-              },
-              fields: [
-              TextField(
-              controller: fName,
-              decoration: _inputDecoration('First Name'),
-              inputFormatters: _textOnlyFormatter,
-              style: TextStyle(color: _textPrimary),
-              ),
-              TextField(
-              controller: lName,
-              decoration: _inputDecoration('Last Name'),
-              inputFormatters: _textOnlyFormatter,
-              style: TextStyle(color: _textPrimary),
-              ),
-              if (isTeacher)
-              TextField(
-              controller: emailLocal,
-              decoration: _inputDecoration('Email').copyWith(
-              suffixText: '@deped.gov.ph',
-              suffixStyle: TextStyle(
-              color: _primaryBlue,
-              fontWeight: FontWeight.w600,
-              fontSize: 13,
-              ),
-              hintText: 'username',
-              ),
-              keyboardType: TextInputType.emailAddress,
-              inputFormatters: [
-              FilteringTextInputFormatter.deny(RegExp(r'[@\s]')),
-              ],
-              style: TextStyle(color: _textPrimary),
-              )
-              else if (isGuardian)
-              TextField(
-              controller: emailLocal,
-              decoration: _inputDecoration('Email').copyWith(
-              suffixText: '@gmail.com',
-              suffixStyle: TextStyle(
-              color: _successGreen,
-              fontWeight: FontWeight.w600,
-              fontSize: 13,
-              ),
-              hintText: 'username',
-              ),
-              keyboardType: TextInputType.emailAddress,
-              inputFormatters: [
-              FilteringTextInputFormatter.deny(RegExp(r'[@\s]')),
-              ],
-              style: TextStyle(color: _textPrimary),
-              )
-              else
-              TextField(
-              controller: email,
-              decoration: _inputDecoration('Email'),
-              keyboardType: TextInputType.emailAddress,
-              style: TextStyle(color: _textPrimary),
-              ),
-              ],
-              ),
-              );
-            }
-            }
+                  final Map<String, dynamic> updateData = {
+                    'firstName': fName.text.trim(),
+                    'lastName': lName.text.trim(),
+                    'email': finalEmail,
+                  };
+
+                  final newPassword = password.text.trim();
+                  if (newPassword.isNotEmpty) {
+                    if (newPassword.length < 6) {
+                      _showSnackbar('Password must be at least 6 characters', isError: true);
+                      return;
+                    }
+                    updateData['password'] = newPassword;
+                  }
+
+                  await DatabaseHelper.instance.updateUser(user['id'], updateData);
+                  _refreshData();
+                  Navigator.pop(context);
+                  _showSnackbar('${user['role']} updated');
+                  },
+                  fields: [
+                  TextField(
+                  controller: fName,
+                  decoration: _inputDecoration('First Name'),
+                  inputFormatters: _textOnlyFormatter,
+                  style: TextStyle(color: _textPrimary),
+                  ),
+                  TextField(
+                  controller: lName,
+                  decoration: _inputDecoration('Last Name'),
+                  inputFormatters: _textOnlyFormatter,
+                  style: TextStyle(color: _textPrimary),
+                  ),
+                  if (isTeacher)
+                  TextField(
+                  controller: emailLocal,
+                  decoration: _inputDecoration('Email').copyWith(
+                  suffixText: '@deped.gov.ph',
+                  suffixStyle: TextStyle(
+                  color: _primaryBlue,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  ),
+                  hintText: 'username',
+                  ),
+                  keyboardType: TextInputType.emailAddress,
+                  inputFormatters: [
+                  FilteringTextInputFormatter.deny(RegExp(r'[@\s]')),
+                  ],
+                  style: TextStyle(color: _textPrimary),
+                  )
+                  else if (isGuardian)
+                  TextField(
+                  controller: emailLocal,
+                  decoration: _inputDecoration('Email').copyWith(
+                  suffixText: '@gmail.com',
+                  suffixStyle: TextStyle(
+                  color: _successGreen,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  ),
+                  hintText: 'username',
+                  ),
+                  keyboardType: TextInputType.emailAddress,
+                  inputFormatters: [
+                  FilteringTextInputFormatter.deny(RegExp(r'[@\s]')),
+                  ],
+                  style: TextStyle(color: _textPrimary),
+                  )
+                  else
+                  TextField(
+                  controller: email,
+                  decoration: _inputDecoration('Email'),
+                  keyboardType: TextInputType.emailAddress,
+                  style: TextStyle(color: _textPrimary),
+                  ),
+                  TextField(
+                  controller: password,
+                  obscureText: obscurePassword,
+                  decoration: _inputDecoration('New Password (leave blank to keep)').copyWith(
+                  suffixIcon: IconButton(
+                  icon: Icon(
+                  obscurePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                  color: _textSecondary,
+                  size: 20,
+                  ),
+                  onPressed: () => setDialogState(() => obscurePassword = !obscurePassword),
+                  ),
+                  ),
+                  style: TextStyle(color: _textPrimary),
+                  ),
+                  ],
+                  ),
+                  ),
+                  );
+                }
+                }

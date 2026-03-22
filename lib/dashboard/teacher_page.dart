@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Added for input formatters
 import 'package:file_picker/file_picker.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
@@ -9,11 +10,13 @@ import 'package:project/database/teacher_db.dart';
 class TeacherPage extends StatefulWidget {
   final VoidCallback toggleTheme;
   final bool isDarkMode;
+  final String loggedInEmail;
 
   const TeacherPage({
     super.key,
     required this.toggleTheme,
     required this.isDarkMode,
+    required this.loggedInEmail,
   });
 
   @override
@@ -58,18 +61,16 @@ class _TeacherPageState extends State<TeacherPage> {
 
   final List<String> menuTitles = [
     'Activities',
-    'Students',
+    'Rooms',
     'Announcements',
     'Attendance',
-    'Profile',
   ];
 
   final List<IconData> menuIcons = [
     Icons.folder,
-    Icons.school,
+    Icons.meeting_room_outlined,
     Icons.campaign,
     Icons.calendar_month,
-    Icons.person,
   ];
 
   final Map<int, String> attendanceStatus = {};
@@ -85,6 +86,10 @@ class _TeacherPageState extends State<TeacherPage> {
   final double _defaultMaxScore = 100.0;
 
   String? _profileImagePath; // local path to the picked profile picture
+
+  // Room state
+  List<Map<String, dynamic>> _rooms = [];
+  final TextEditingController _roomTitleController = TextEditingController();
 
   @override
   void initState() {
@@ -303,6 +308,7 @@ class _TeacherPageState extends State<TeacherPage> {
     _emailController.dispose();
     _phoneController.dispose();
     _advisoryClassController.dispose();
+    _roomTitleController.dispose();
     super.dispose();
   }
 
@@ -370,27 +376,8 @@ class _TeacherPageState extends State<TeacherPage> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 20),
-                    CircleAvatar(
-                      radius: 40,
-                      backgroundColor: Colors.blue,
-                      backgroundImage: _profileImagePath != null
-                          ? FileImage(File(_profileImagePath!))
-                          : null,
-                      child: _profileImagePath == null
-                          ? const Icon(Icons.person, size: 40, color: Colors.white)
-                          : null,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      teacherProfile['name'],
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
-                    Text(
-                      "Teacher ID: ${teacherProfile['teacherId']}",
-                      style: const TextStyle(color: Colors.grey, fontSize: 12),
-                    ),
-                    const SizedBox(height: 30),
+                    const Divider(height: 1),
+                    const SizedBox(height: 8),
                     Expanded(
                       child: ListView.builder(
                         itemCount: menuTitles.length,
@@ -415,6 +402,7 @@ class _TeacherPageState extends State<TeacherPage> {
                         },
                       ),
                     ),
+                    const Divider(height: 1),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       child: Container(
@@ -434,7 +422,12 @@ class _TeacherPageState extends State<TeacherPage> {
                     ListTile(
                       leading: const Icon(Icons.logout, color: Colors.redAccent),
                       title: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
-                      onTap: () => Navigator.pushReplacementNamed(context, '/login'),
+                      onTap: () async {
+                        await ActivityDatabase.instance.close();
+                        if (context.mounted) {
+                          Navigator.pushReplacementNamed(context, '/login');
+                        }
+                      },
                     ),
                     const SizedBox(height: 20),
                   ],
@@ -450,211 +443,322 @@ class _TeacherPageState extends State<TeacherPage> {
                   onPressed: () => setState(() => isSidebarOpen = true),
                 ),
               ),
+            // Profile avatar top-right — taps to Profile section
+            if (!isSidebarOpen)
+              Positioned(
+                top: 10,
+                right: 16,
+                child: GestureDetector(
+                  onTap: () => setState(() => selectedIndex = 4),
+                  child: CircleAvatar(
+                    radius: 20,
+                    backgroundColor: Colors.blue,
+                    backgroundImage: _profileImagePath != null
+                        ? FileImage(File(_profileImagePath!))
+                        : null,
+                    child: _profileImagePath == null
+                        ? const Icon(Icons.person, size: 20, color: Colors.white)
+                        : null,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
     );
   }
 
-  Widget _studentsSection() {
-    List<String> filteredStudents = students.where((name) {
-      return name.toLowerCase().contains(_studentSearchController.text.toLowerCase());
-    }).toList();
-    filteredStudents.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  void _showCreateRoomDialog() {
+    _roomTitleController.clear();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Create Room'),
+        content: TextField(
+          controller: _roomTitleController,
+          decoration: const InputDecoration(
+            labelText: 'Room Title',
+            hintText: 'e.g. Grade 3 - Section A',
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              final title = _roomTitleController.text.trim();
+              if (title.isEmpty) return;
+              Navigator.pop(ctx);
+              final room = await ActivityDatabase.instance.createRoom(title, widget.loggedInEmail);
+              if (room != null) {
+                setState(() => _rooms.insert(0, room));
+                if (mounted) _showRoomCodeDialog(room);
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+  }
 
+  void _showRoomCodeDialog([Map<String, dynamic>? room]) {
+    final r = room ?? (_rooms.isNotEmpty ? _rooms.first : null);
+    if (r == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Room Code'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(r['title'] ?? '', style: const TextStyle(color: Colors.grey, fontSize: 14)),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.blue, width: 2),
+              ),
+              child: Text(
+                r['code'] ?? '',
+                style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold, letterSpacing: 8, color: Colors.blue),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text('Share this code with guardians to join your room.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 13)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteRoomDialog([Map<String, dynamic>? room]) {
+    final r = room ?? (_rooms.isNotEmpty ? _rooms.first : null);
+    if (r == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Room'),
+        content: Text('Are you sure you want to delete "${r['title']}"? All guardians will be removed from it.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await ActivityDatabase.instance.deleteRoomByCode(r['code']);
+              setState(() => _rooms.removeWhere((rm) => rm['code'] == r['code']));
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Room deleted.')));
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _roomsSection() {
     return Stack(
       children: [
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 24, 8),
-              child: Row(
-                children: const [
-                  SizedBox(width: 48),
-                  Text(
-                    'Student Progress',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
+              padding: const EdgeInsets.fromLTRB(72, 16, 16, 8),
+              child: const Text('Rooms', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: TextField(
-                controller: _studentSearchController,
-                decoration: InputDecoration(
-                  hintText: 'Search added students...',
-                  prefixIcon: const Icon(Icons.search),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                ),
-                onChanged: (value) => setState(() {}),
-              ),
-            ),
-            Expanded(
-              child: students.isEmpty
-                  ? const Center(child: Text('Click the "+Add" button to select students.'))
-                  : filteredStudents.isEmpty
-                  ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.person_search, size: 64, color: Colors.grey[400]),
-                    const SizedBox(height: 16),
-                    Text(
-                      "No student found matching '${_studentSearchController.text}'",
-                      style: TextStyle(fontSize: 16, color: Colors.grey[600], fontWeight: FontWeight.w500),
+
+            // Rooms list
+            if (_rooms.isEmpty)
+              Expanded(
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.meeting_room_outlined, size: 64, color: Colors.grey[300]),
+                        const SizedBox(height: 16),
+                        Text('No rooms yet.', style: TextStyle(fontSize: 16, color: Colors.grey[500])),
+                        const SizedBox(height: 8),
+                        Text('Tap the + button to create your first room.', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: Colors.grey[400])),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               )
-                  : ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: filteredStudents.length,
-                separatorBuilder: (context, index) => const SizedBox(height: 8),
-                itemBuilder: (context, sIndex) {
-                  String student = filteredStudents[sIndex];
-
-                  double totalScore = 0;
-                  int gradedCount = 0;
-                  _studentGrades[student]?.forEach((key, data) {
-                    if (data['grade'] != null) {
-                      totalScore += data['grade'];
-                      gradedCount++;
-                    }
-                  });
-                  String summaryText = gradedCount > 0
-                      ? "Summary: ${(totalScore / (gradedCount * 100) * 100).toStringAsFixed(0)}%"
-                      : "Grade Summary: 0%";
-
-                  return Card(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: ExpansionTile(
-                      leading: CircleAvatar(
-                        backgroundColor: Colors.blue.shade100,
-                        child: Text(student.substring(0, 1).toUpperCase()),
-                      ),
-                      title: _highlightText(student, _studentSearchController.text),
-                      subtitle: Text('${_activities.length} total activities'),
-                      children: [
-                        Padding(
+            else
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 80), // bottom padding for FAB
+                  itemCount: _rooms.length,
+                  itemBuilder: (context, index) {
+                    final room = _rooms[index];
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      color: Colors.blue.withOpacity(0.07),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: () => _enterRoom(room),
+                        child: Padding(
                           padding: const EdgeInsets.all(16),
-                          child: Column(
+                          child: Row(
                             children: [
-                              ..._activities.map((activity) {
-                                String key = _getActivityKey(activity);
-                                Map<String, dynamic> gradeData = _studentGrades[student]![key] ?? {};
-                                TextEditingController controller = _gradeControllers[student]![key]!;
-
-                                double score = gradeData['grade'] ?? 0.0;
-                                String percentage = "${((score / _defaultMaxScore) * 100).toStringAsFixed(0)}%";
-
-                                return Container(
-                                  margin: const EdgeInsets.only(bottom: 12),
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    border: Border.all(color: Colors.grey.shade300),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Expanded(
-                                            child: Text(activity['title'],
-                                                style: const TextStyle(fontWeight: FontWeight.w600)),
-                                          ),
-                                          DropdownButton<String>(
-                                            value: gradeData['status'] ?? 'Pending',
-                                            underline: const SizedBox(),
-                                            items: ['Pending', 'Completed', 'Late', 'Missed'].map((String value) {
-                                              return DropdownMenuItem<String>(
-                                                value: value,
-                                                child: Text(value, style: TextStyle(
-                                                  fontSize: 12,
-                                                  color: value == 'Missed' ? Colors.red
-                                                      : value == 'Late' ? Colors.orange.shade700
-                                                      : (value == 'Completed' ? Colors.green : Colors.orange),
-                                                )),
-                                              );
-                                            }).toList(),
-                                            onChanged: (newValue) {
-                                              setState(() {
-                                                _studentGrades[student]![key]!['status'] = newValue;
-                                                if (newValue == 'Missed') {
-                                                  _studentGrades[student]![key]!['grade'] = 0.0;
-                                                  controller.text = "0";
-                                                }
-                                              });
-                                            },
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: TextField(
-                                              controller: controller,
-                                              keyboardType: TextInputType.number,
-                                              decoration: InputDecoration(
-                                                labelText: 'Score',
-                                                suffixText: '/ 100',
-                                                hintText: '/ 100',
-                                                border: const OutlineInputBorder(),
-                                                helperText: 'Percentage: $percentage',
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          IconButton(
-                                            icon: const Icon(Icons.save, color: Colors.blue),
-                                            onPressed: () => _saveGrade(student, key, controller.text),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              }).toList(),
-                              const Divider(),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.end,
+                              const Icon(Icons.meeting_room, color: Colors.blue, size: 36),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
+                                    Text(room['title'] ?? '', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                    const SizedBox(height: 4),
                                     Text(
-                                      summaryText,
-                                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blue),
+                                      'Code: ${room['code'] ?? ''}',
+                                      style: const TextStyle(fontSize: 14, color: Colors.blue, fontWeight: FontWeight.w600, letterSpacing: 2),
                                     ),
                                   ],
+                                ),
+                              ),
+                              // Use GestureDetector to stop tap from propagating to InkWell
+                              GestureDetector(
+                                onTap: () {}, // absorb tap
+                                child: IconButton(
+                                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                                  tooltip: 'Delete room',
+                                  onPressed: () => _showDeleteRoomDialog(room),
                                 ),
                               ),
                             ],
                           ),
                         ),
-                      ],
-                    ),
-                  );
-                },
+                      ),
+                    );
+                  },
+                ),
               ),
-            ),
+
+            // Student progress section
+            if (students.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                child: Text('Student Progress', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.grey[700])),
+              ),
+              SizedBox(
+                height: 300,
+                child: ListView.separated(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: students.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (context, sIndex) {
+                    final student = students[sIndex];
+                    double totalScore = 0;
+                    int gradedCount = 0;
+                    _studentGrades[student]?.forEach((key, data) {
+                      if (data['grade'] != null) { totalScore += data['grade']; gradedCount++; }
+                    });
+                    final summaryText = gradedCount > 0
+                        ? "Summary: ${(totalScore / (gradedCount * 100) * 100).toStringAsFixed(0)}%"
+                        : "Grade Summary: 0%";
+                    return Card(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: ExpansionTile(
+                        leading: CircleAvatar(backgroundColor: Colors.blue.shade100, child: Text(student.substring(0, 1).toUpperCase())),
+                        title: Text(student, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        subtitle: Text('${_activities.length} total activities'),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              children: [
+                                ..._activities.map((activity) {
+                                  final key = _getActivityKey(activity);
+                                  final gradeData = _studentGrades[student]?[key] ?? {};
+                                  final controller = _gradeControllers[student]?[key] ?? TextEditingController();
+                                  final score = gradeData['grade'] ?? 0.0;
+                                  final percentage = "${((score / _defaultMaxScore) * 100).toStringAsFixed(0)}%";
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 12),
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+                                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                                        Expanded(child: Text(activity['title'], style: const TextStyle(fontWeight: FontWeight.w600))),
+                                        DropdownButton<String>(
+                                          value: gradeData['status'] ?? 'Pending',
+                                          underline: const SizedBox(),
+                                          items: ['Pending', 'Completed', 'Late', 'Missed'].map((v) => DropdownMenuItem(value: v, child: Text(v, style: TextStyle(fontSize: 12, color: v == 'Missed' ? Colors.red : v == 'Late' ? Colors.orange.shade700 : v == 'Completed' ? Colors.green : Colors.orange)))).toList(),
+                                          onChanged: (newValue) {
+                                            setState(() {
+                                              _studentGrades[student]![key]!['status'] = newValue;
+                                              if (newValue == 'Missed') { _studentGrades[student]![key]!['grade'] = 0.0; controller.text = "0"; }
+                                            });
+                                          },
+                                        ),
+                                      ]),
+                                      const SizedBox(height: 8),
+                                      Row(children: [
+                                        Expanded(child: TextField(controller: controller, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: 'Score', suffixText: '/ 100', border: const OutlineInputBorder(), helperText: 'Percentage: $percentage'))),
+                                        const SizedBox(width: 8),
+                                        IconButton(icon: const Icon(Icons.save, color: Colors.blue), onPressed: () => _saveGrade(student, key, controller.text)),
+                                      ]),
+                                    ]),
+                                  );
+                                }).toList(),
+                                const Divider(),
+                                Row(mainAxisAlignment: MainAxisAlignment.end, children: [Text(summaryText, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blue))]),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ],
         ),
+
+        // + FAB bottom-right
         Positioned(
-          top: 16,
-          right: 16,
-          child: ElevatedButton.icon(
-            onPressed: _showAddStudentDialog,
-            icon: const Icon(Icons.add),
-            label: const Text('Add'),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.lightGreen, foregroundColor: Colors.white),
+          bottom: 24,
+          right: 24,
+          child: FloatingActionButton(
+            onPressed: _showCreateRoomDialog,
+            backgroundColor: Colors.blue,
+            foregroundColor: Colors.white,
+            child: const Icon(Icons.add),
           ),
         ),
       ],
+    );
+  }
+
+  void _enterRoom(Map<String, dynamic> room) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => RoomDetailPage(
+          room: room,
+          students: students,
+          activities: _activities,
+          studentGrades: _studentGrades,
+          gradeControllers: _gradeControllers,
+          defaultMaxScore: _defaultMaxScore,
+          isDarkMode: widget.isDarkMode,
+          onSaveGrade: _saveGrade,
+        ),
+      ),
     );
   }
 
@@ -701,6 +805,7 @@ class _TeacherPageState extends State<TeacherPage> {
 
   void _showUploadModal(BuildContext context) {
     _selectedFile = null;
+    String? selectedRoomCode = _rooms.isNotEmpty ? _rooms.first["code"]?.toString() : null;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -720,6 +825,24 @@ class _TeacherPageState extends State<TeacherPage> {
               const Text('Upload New Activity',
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 20),
+              // Room selector
+              DropdownButtonFormField<String>(
+                value: selectedRoomCode,
+                decoration: const InputDecoration(
+                  labelText: 'Post to Room',
+                  prefixIcon: Icon(Icons.meeting_room_outlined),
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  const DropdownMenuItem<String>(value: null, child: Text('All Rooms (General)')),
+                  ..._rooms.map((room) => DropdownMenuItem<String>(
+                    value: room['code']?.toString(),
+                    child: Text(room['title']?.toString() ?? 'Room'),
+                  )),
+                ],
+                onChanged: (value) => setModalState(() => selectedRoomCode = value),
+              ),
+              const SizedBox(height: 16),
               TextField(
                 controller: _activityTitleController,
                 decoration: const InputDecoration(
@@ -798,6 +921,7 @@ class _TeacherPageState extends State<TeacherPage> {
                       'fileName': _selectedFile?.name ?? '',
                       'filePath': _selectedFile?.path ?? '',
                       'date': DateTime.now().toString(),
+                      'roomCode': selectedRoomCode ?? '',
                     };
 
                     try {
@@ -862,71 +986,98 @@ class _TeacherPageState extends State<TeacherPage> {
     return '$fourDigit-$twoDigit';
   }
 
-  // UPDATED: Fetches profile and content from the database
   Future<void> _fetchDatabaseContent() async {
-    // Fallback profile
-    final fallbackProfile = {
-      'teacherId': '4821-37', // Static fallback for consistency
-      'name': 'Ryan Caesar Mendoza',
-      'email': 'rycaesarmendoza@deped.gov.ph',
-      'phone': '09123456789',
-      'subject': 'Software Engineering',
-      'advisoryClass': 'BSIT-3A',
-    };
-
     Map<String, dynamic>? profileData;
     List<Map<String, dynamic>> data = [];
     List<Map<String, dynamic>> announcementData = [];
     List<Map<String, dynamic>> savedGrades = [];
 
-    try {
-      // 1. Fetch Teacher Profile, Activities, and Announcements
-      profileData = await ActivityDatabase.instance.getTeacherProfile();
-      data = await ActivityDatabase.instance.getActivities();
-      announcementData = await ActivityDatabase.instance.getAnnouncements();
+    // Retry up to 2 times — handles race condition when DB re-opens after logout
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        profileData = await ActivityDatabase.instance.getTeacherProfile(email: widget.loggedInEmail);
+        if (profileData == null) {
+          profileData = await ActivityDatabase.instance.getTeacherFromAdminDB(widget.loggedInEmail);
+        }
+        profileData ??= {
+          'teacherId': '',
+          'name': '',
+          'email': widget.loggedInEmail,
+          'phone': '',
+          'subject': '',
+          'advisoryClass': '',
+        };
 
-      // 2. NEW: Fetch all saved grades from the database
-      savedGrades = await ActivityDatabase.instance.getAllGrades();
-    } catch (e) {
-      debugPrint("Error loading data: $e");
+        data = await ActivityDatabase.instance.getActivities();
+        announcementData = await ActivityDatabase.instance.getAnnouncements();
+        savedGrades = await ActivityDatabase.instance.getAllGrades();
+
+        final rooms = await ActivityDatabase.instance.getRoomsByTeacher(widget.loggedInEmail);
+        if (rooms.isNotEmpty) {
+          setState(() => _rooms = rooms);
+          // Load all members from all rooms as students
+          for (final room in rooms) {
+            final members = await ActivityDatabase.instance.getRoomMembers(widget.loggedInEmail);
+            for (final member in members) {
+              _addStudentToState(member['name']);
+            }
+          }
+        }
+        break; // success — exit retry loop
+      } catch (e) {
+        debugPrint("Error loading data (attempt ${attempt + 1}): $e");
+        if (attempt == 0) {
+          // Brief pause then retry
+          await Future.delayed(const Duration(milliseconds: 300));
+        } else {
+          profileData ??= {
+            'teacherId': '',
+            'name': '',
+            'email': widget.loggedInEmail,
+            'phone': '',
+            'subject': '',
+            'advisoryClass': '',
+          };
+        }
+      }
     }
 
     setState(() {
-      final profile = profileData ?? fallbackProfile;
-      teacherProfile = Map<String, dynamic>.from(profile);
+      teacherProfile = Map<String, dynamic>.from(profileData!);
 
       _nameController.text = teacherProfile['name'] ?? '';
       _emailController.text = teacherProfile['email'] ?? '';
       _phoneController.text = teacherProfile['phone'] ?? '';
       _advisoryClassController.text = teacherProfile['advisoryClass'] ?? '';
 
+      // Restore saved profile image if it exists
+      final savedImage = (teacherProfile['profileImage'] ?? '').toString();
+      if (savedImage.isNotEmpty && File(savedImage).existsSync()) {
+        _profileImagePath = savedImage;
+      }
+
       _activities = List<Map<String, dynamic>>.from(data);
       _announcements = List<Map<String, dynamic>>.from(announcementData);
 
-      // 3. Initialize students with activity placeholders
       for (var activity in _activities) {
         _initNewActivityForAllStudents(activity);
       }
 
-      // 4. NEW: Overwrite placeholders with actual saved grades from DB
       for (var row in savedGrades) {
         String sName = row['studentName'];
         String aKey = row['activityKey'];
         double? score = row['grade'];
         String status = row['status'] ?? 'Pending';
 
-        // Ensure the student entry exists in our local maps
         _studentGrades[sName] ??= {};
         _gradeControllers[sName] ??= {};
 
-        // Update the grade map
         _studentGrades[sName]![aKey] = {
           'grade': score,
-          'maxScore': 100.0, // Or your preferred default
+          'maxScore': 100.0,
           'status': status,
         };
 
-        // Update the text controller so the score shows up in the TextField
         if (_gradeControllers[sName]![aKey] == null) {
           _gradeControllers[sName]![aKey] = TextEditingController();
         }
@@ -947,82 +1098,104 @@ class _TeacherPageState extends State<TeacherPage> {
   void _showAnnouncementModal(BuildContext context) {
     _announcementTitleController.clear();
     _announcementMessageController.clear();
+    String? selectedRoomCode = _rooms.isNotEmpty ? _rooms.first["code"]?.toString() : null;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-          left: 20, right: 20, top: 20,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Post New Announcement',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-            TextField(
-              controller: _announcementTitleController,
-              decoration: const InputDecoration(
-                labelText: 'Announcement Title',
-                border: OutlineInputBorder(),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+            left: 20, right: 20, top: 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Post New Announcement',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              // Room selector
+              DropdownButtonFormField<String>(
+                value: selectedRoomCode,
+                decoration: const InputDecoration(
+                  labelText: 'Post to Room',
+                  prefixIcon: Icon(Icons.meeting_room_outlined),
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  const DropdownMenuItem<String>(value: null, child: Text('All Rooms (General)')),
+                  ..._rooms.map((room) => DropdownMenuItem<String>(
+                    value: room['code']?.toString(),
+                    child: Text(room['title']?.toString() ?? 'Room'),
+                  )),
+                ],
+                onChanged: (value) => setModalState(() => selectedRoomCode = value),
               ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _announcementMessageController,
-              maxLines: 4,
-              decoration: const InputDecoration(
-                labelText: 'Announcement Message',
-                border: OutlineInputBorder(),
-                alignLabelWithHint: true,
+              const SizedBox(height: 16),
+              TextField(
+                controller: _announcementTitleController,
+                decoration: const InputDecoration(
+                  labelText: 'Announcement Title',
+                  border: OutlineInputBorder(),
+                ),
               ),
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                onPressed: () async {
-                  String title = _announcementTitleController.text.trim();
-                  String message = _announcementMessageController.text.trim();
-                  if (title.isEmpty || message.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Please fill in all fields')),
-                    );
-                    return;
-                  }
-                  final newAnnouncement = {
-                    'title': title,
-                    'message': message,
-                    'date': _getCurrentDate(),
-                  };
-                  try {
-                    await ActivityDatabase.instance.insertAnnouncement(newAnnouncement);
-                    setState(() {
-                      _announcements.insert(0, newAnnouncement);
-                    });
-                    if (mounted) {
-                      Navigator.pop(context);
+              const SizedBox(height: 16),
+              TextField(
+                controller: _announcementMessageController,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Announcement Message',
+                  border: OutlineInputBorder(),
+                  alignLabelWithHint: true,
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    String title = _announcementTitleController.text.trim();
+                    String message = _announcementMessageController.text.trim();
+                    if (title.isEmpty || message.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Announcement posted successfully!')),
+                        const SnackBar(content: Text('Please fill in all fields')),
+                      );
+                      return;
+                    }
+                    final newAnnouncement = {
+                      'title': title,
+                      'message': message,
+                      'date': _getCurrentDate(),
+                      'roomCode': selectedRoomCode ?? '',
+                    };
+                    try {
+                      await ActivityDatabase.instance.insertAnnouncement(newAnnouncement);
+                      setState(() {
+                        _announcements.insert(0, newAnnouncement);
+                      });
+                      if (mounted) {
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Announcement posted successfully!')),
+                        );
+                      }
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Database Error: $e')),
                       );
                     }
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Database Error: $e')),
-                    );
-                  }
-                },
-                child: const Text('Post Announcement'),
+                  },
+                  child: const Text('Post Announcement'),
+                ),
               ),
-            ),
-            const SizedBox(height: 20),
-          ],
+              const SizedBox(height: 20),
+            ],
+          ),
         ),
       ),
     );
@@ -1033,7 +1206,7 @@ class _TeacherPageState extends State<TeacherPage> {
       case 0:
         return _activitiesSection();
       case 1:
-        return _studentsSection();
+        return _roomsSection();
       case 2:
         return _announcementsSection();
       case 3:
@@ -1282,7 +1455,7 @@ class _TeacherPageState extends State<TeacherPage> {
 
   Widget _attendanceSection() {
     if (students.isEmpty) {
-      return _genericSection('Attendance', const Center(child: Text('Add students first.')));
+      return _genericSection('Attendance', const Center(child: Text('No students yet. Students appear automatically when a guardian joins your room.')));
     }
     if (_currentAttendance.isEmpty) _currentAttendance = _getAttendanceForDate(_selectedAttendanceDate);
     return Column(
@@ -1422,23 +1595,27 @@ class _TeacherPageState extends State<TeacherPage> {
     );
   }
 
-  // UPDATED: Saves profile changes back to the SQL database
   void _toggleEditMode() async {
     if (isEditing) {
       final updatedProfile = {
         ...teacherProfile,
-        'phone': _phoneController.text,
-        'advisoryClass': _advisoryClassController.text,
+        'phone': _phoneController.text.trim(),
+        'advisoryClass': _advisoryClassController.text.trim(),
+        'email': widget.loggedInEmail,
+        'profileImage': _profileImagePath ?? (teacherProfile['profileImage'] ?? ''),
+        'teacherId': (teacherProfile['teacherId'] ?? '').toString().isNotEmpty
+            ? teacherProfile['teacherId']
+            : _generateTeacherId(),
       };
 
       try {
-        // Save to Database via teacher_db.dart logic
         await ActivityDatabase.instance.updateTeacherProfile(updatedProfile);
 
-        // Reload from DB so teacherId stays in sync (e.g. after first insert)
-        final savedProfile = await ActivityDatabase.instance.getTeacherProfile();
+        // Re-fetch by email so teacherId and name are always in sync with what was saved
+        final savedProfile = await ActivityDatabase.instance.getTeacherProfile(email: widget.loggedInEmail);
 
         setState(() {
+          // Use savedProfile if available, otherwise keep updatedProfile — never fall back to stale defaults
           teacherProfile = savedProfile ?? updatedProfile;
           _nameController.text = teacherProfile['name'] ?? '';
           _emailController.text = teacherProfile['email'] ?? '';
@@ -1447,13 +1624,17 @@ class _TeacherPageState extends State<TeacherPage> {
           isEditing = false;
         });
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile updated in database')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Profile updated successfully')),
+          );
+        }
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving: $e')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error saving: $e')),
+          );
+        }
       }
     } else {
       setState(() => isEditing = true);
@@ -1462,13 +1643,48 @@ class _TeacherPageState extends State<TeacherPage> {
 
   Future<void> _pickProfileImage() async {
     try {
+      // 1. Pick image from gallery
       final result = await FilePicker.platform.pickFiles(
         type: FileType.image,
         allowMultiple: false,
       );
-      if (result != null && result.files.single.path != null) {
-        setState(() => _profileImagePath = result.files.single.path);
-      }
+      if (result == null || result.files.single.path == null) return;
+
+      // 2. Launch circular cropper
+      final croppedFile = await ImageCropper().cropImage(
+        sourcePath: result.files.single.path!,
+        uiSettings: [
+          AndroidUiSettings(
+            toolbarTitle: 'Crop Profile Photo',
+            toolbarColor: Colors.blue,
+            toolbarWidgetColor: Colors.white,
+            activeControlsWidgetColor: Colors.blue,
+            lockAspectRatio: true,
+            hideBottomControls: false,
+            cropStyle: CropStyle.circle,
+            aspectRatioPresets: [CropAspectRatioPreset.square],
+          ),
+          IOSUiSettings(
+            title: 'Crop Profile Photo',
+            aspectRatioLockEnabled: true,
+            resetAspectRatioEnabled: false,
+            cropStyle: CropStyle.circle,
+          ),
+        ],
+      );
+
+      if (croppedFile == null) return; // User cancelled cropper
+
+      final path = croppedFile.path;
+      setState(() => _profileImagePath = path);
+
+      // 3. Persist immediately to DB
+      final updatedProfile = {
+        ...teacherProfile,
+        'profileImage': path,
+        'email': widget.loggedInEmail,
+      };
+      await ActivityDatabase.instance.updateTeacherProfile(updatedProfile);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1635,5 +1851,199 @@ class _TeacherPageState extends State<TeacherPage> {
       _gradeControllers[student]?.remove(key);
     }
     setState(() {});
+  }
+}
+// ─── Room Detail Page ────────────────────────────────────────────────────────
+
+class RoomDetailPage extends StatefulWidget {
+  final Map<String, dynamic> room;
+  final List<String> students;
+  final List<Map<String, dynamic>> activities;
+  final Map<String, Map<String, Map<String, dynamic>>> studentGrades;
+  final Map<String, Map<String, TextEditingController>> gradeControllers;
+  final double defaultMaxScore;
+  final bool isDarkMode;
+  final void Function(String, String, String) onSaveGrade;
+
+  const RoomDetailPage({
+    super.key,
+    required this.room,
+    required this.students,
+    required this.activities,
+    required this.studentGrades,
+    required this.gradeControllers,
+    required this.defaultMaxScore,
+    required this.isDarkMode,
+    required this.onSaveGrade,
+  });
+
+  @override
+  State<RoomDetailPage> createState() => _RoomDetailPageState();
+}
+
+class _RoomDetailPageState extends State<RoomDetailPage> {
+  int _tabIndex = 0; // 0 = Students, 1 = Activities
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = widget.isDarkMode ? Colors.grey[900] : Colors.white;
+    final titleColor = widget.isDarkMode ? Colors.white : Colors.black;
+
+    return Scaffold(
+      backgroundColor: bg,
+      appBar: AppBar(
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.room['title'] ?? 'Room', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text('Code: ${widget.room['code'] ?? ''}', style: const TextStyle(fontSize: 13, letterSpacing: 3, color: Colors.white70)),
+          ],
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48),
+          child: Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  onTap: () => setState(() => _tabIndex = 0),
+                  child: Container(
+                    height: 48,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      border: Border(bottom: BorderSide(color: _tabIndex == 0 ? Colors.white : Colors.transparent, width: 3)),
+                    ),
+                    child: Text('Students (${widget.students.length})', style: TextStyle(color: _tabIndex == 0 ? Colors.white : Colors.white60, fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: InkWell(
+                  onTap: () => setState(() => _tabIndex = 1),
+                  child: Container(
+                    height: 48,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      border: Border(bottom: BorderSide(color: _tabIndex == 1 ? Colors.white : Colors.transparent, width: 3)),
+                    ),
+                    child: Text('Activities (${widget.activities.length})', style: TextStyle(color: _tabIndex == 1 ? Colors.white : Colors.white60, fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      body: _tabIndex == 0 ? _buildStudentsTab(titleColor) : _buildActivitiesTab(titleColor),
+    );
+  }
+
+  Widget _buildStudentsTab(Color titleColor) {
+    if (widget.students.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.people_outline, size: 64, color: Colors.grey[300]),
+            const SizedBox(height: 16),
+            Text('No students yet.', style: TextStyle(fontSize: 16, color: Colors.grey[500])),
+            const SizedBox(height: 8),
+            Text('Students appear when a guardian joins this room.', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: Colors.grey[400])),
+          ],
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.all(16),
+      itemCount: widget.students.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (context, i) {
+        final student = widget.students[i];
+        double total = 0;
+        int graded = 0;
+        widget.studentGrades[student]?.forEach((_, data) {
+          if (data['grade'] != null) { total += data['grade']; graded++; }
+        });
+        final summary = graded > 0 ? '${(total / (graded * 100) * 100).toStringAsFixed(0)}%' : '0%';
+
+        return Card(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: ExpansionTile(
+            leading: CircleAvatar(backgroundColor: Colors.blue.shade100, child: Text(student[0].toUpperCase())),
+            title: Text(student, style: const TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Text('Grade summary: $summary'),
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    ...widget.activities.map((activity) {
+                      final key = '${activity['title']}_${activity['date']}';
+                      final gradeData = widget.studentGrades[student]?[key] ?? {};
+                      final controller = widget.gradeControllers[student]?[key] ?? TextEditingController();
+                      final score = (gradeData['grade'] ?? 0.0) as double;
+                      final pct = '${((score / widget.defaultMaxScore) * 100).toStringAsFixed(0)}%';
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(activity['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 8),
+                          Row(children: [
+                            Expanded(child: TextField(
+                              controller: controller,
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(labelText: 'Score', suffixText: '/ 100', border: const OutlineInputBorder(), helperText: 'Pct: $pct'),
+                            )),
+                            const SizedBox(width: 8),
+                            IconButton(icon: const Icon(Icons.save, color: Colors.blue), onPressed: () => widget.onSaveGrade(student, key, controller.text)),
+                          ]),
+                        ]),
+                      );
+                    }).toList(),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildActivitiesTab(Color titleColor) {
+    if (widget.activities.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.folder_open, size: 64, color: Colors.grey[300]),
+            const SizedBox(height: 16),
+            Text('No activities posted yet.', style: TextStyle(fontSize: 16, color: Colors.grey[500])),
+          ],
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.all(16),
+      itemCount: widget.activities.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (context, i) {
+        final act = widget.activities[i];
+        return Card(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: ListTile(
+            leading: const CircleAvatar(backgroundColor: Colors.blue, child: Icon(Icons.assignment, color: Colors.white)),
+            title: Text(act['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Text(act['date'] ?? ''),
+            trailing: act['fileName'] != null && (act['fileName'] as String).isNotEmpty
+                ? const Icon(Icons.attach_file, color: Colors.grey)
+                : null,
+          ),
+        );
+      },
+    );
   }
 }

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart' as p;
+import 'package:project/database/admin_db.dart';
 import 'forgot_password_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -45,12 +44,9 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isLoading = true);
 
     try {
-      // 2. Open the existing local database [cite: 1, 36]
-      final dbPath = await getDatabasesPath();
-      final path = p.join(dbPath, 'user_data.db'); // FIX: Used p.join
-      final Database db = await openDatabase(path);
+      // Use DatabaseHelper so onOpen migrations always run first
+      final db = await DatabaseHelper.instance.database;
 
-      // 3. Query the 'users' table [cite: 36, 37]
       final List<Map<String, dynamic>> results = await db.query(
         'users',
         where: 'email = ? AND password = ?',
@@ -62,9 +58,9 @@ class _LoginPageState extends State<LoginPage> {
         String role = results[0]['role'].toString().toLowerCase();
 
         if (role == 'teacher') {
-          Navigator.pushReplacementNamed(context, '/teacher-dashboard');
+          Navigator.pushReplacementNamed(context, '/teacher-dashboard', arguments: email);
         } else if (role == 'guardian') {
-          Navigator.pushReplacementNamed(context, '/guardian-dashboard');
+          Navigator.pushReplacementNamed(context, '/guardian-dashboard', arguments: email);
         } else {
           _showSnackBar('Role "$role" not recognized.');
         }

@@ -19,9 +19,18 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 4, // Reverted to version 4 as attendance/grades are removed
+      version: 4,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
+      onOpen: (db) async {
+        // Guarantee the status column exists on every open —
+        // covers installs that were created before version 3 migration ran.
+        try {
+          await db.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'Active'");
+        } catch (_) {} // Already exists — safe to ignore
+        // Backfill any rows with NULL status
+        await db.execute("UPDATE users SET status = 'Active' WHERE status IS NULL");
+      },
     );
   }
 

@@ -65,14 +65,22 @@ class _MyAppState extends State<MyApp> {
           toggleTheme: toggleTheme,
           isDarkMode: isDarkMode,
         ),
-        '/teacher-dashboard': (context) => TeacherPage(
-          toggleTheme: toggleTheme,
-          isDarkMode: isDarkMode,
-        ),
-        '/guardian-dashboard': (context) => GuardianPage(
-          toggleTheme: toggleTheme,
-          isDarkMode: isDarkMode,
-        ),
+        '/teacher-dashboard': (context) {
+          final email = ModalRoute.of(context)!.settings.arguments as String? ?? '';
+          return TeacherPage(
+            toggleTheme: toggleTheme,
+            isDarkMode: isDarkMode,
+            loggedInEmail: email,
+          );
+        },
+        '/guardian-dashboard': (context) {
+          final email = ModalRoute.of(context)!.settings.arguments as String? ?? '';
+          return GuardianPage(
+            toggleTheme: toggleTheme,
+            isDarkMode: isDarkMode,
+            loggedInEmail: email,
+          );
+        },
         '/admin-dashboard': (context) => AdminPage(
           toggleTheme: toggleTheme,
           isDarkMode: isDarkMode,

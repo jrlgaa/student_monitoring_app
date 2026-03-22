@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -40,9 +41,15 @@ class ActivityDatabase {
         phone TEXT,
         subject TEXT,
         advisoryClass TEXT,
-        teacher_id TEXT
+        teacher_id TEXT,
+        profile_image TEXT
       )
     ''');
+
+    // Add profile_image to existing DBs that were created before this column
+    try {
+      await db.execute('ALTER TABLE users ADD COLUMN profile_image TEXT');
+    } catch (_) {} // Already exists — safe to ignore
 
     // 2. Activities table
     await db.execute('''
@@ -52,9 +59,11 @@ class ActivityDatabase {
         description TEXT,
         fileName TEXT,
         filePath TEXT,
-        date TEXT NOT NULL
+        date TEXT NOT NULL,
+        roomCode TEXT DEFAULT ''
       )
     ''');
+    try { await db.execute("ALTER TABLE activities ADD COLUMN roomCode TEXT DEFAULT ''"); } catch (_) {}
 
     // 3. Announcements table
     await db.execute('''
@@ -62,9 +71,11 @@ class ActivityDatabase {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
         message TEXT,
-        date TEXT NOT NULL
+        date TEXT NOT NULL,
+        roomCode TEXT DEFAULT ''
       )
     ''');
+    try { await db.execute("ALTER TABLE announcements ADD COLUMN roomCode TEXT DEFAULT ''"); } catch (_) {}
 
     // 4. Student Grades table
     await db.execute('''
@@ -86,6 +97,28 @@ class ActivityDatabase {
         date TEXT NOT NULL,
         status TEXT NOT NULL,
         UNIQUE(studentName, date) ON CONFLICT REPLACE
+      )
+    ''');
+
+    // 6. Rooms table
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS rooms (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        code TEXT NOT NULL UNIQUE,
+        teacherEmail TEXT NOT NULL,
+        createdAt TEXT DEFAULT (datetime('now'))
+      )
+    ''');
+
+    // 7. Room members table (guardians who joined)
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS room_members (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        roomCode TEXT NOT NULL,
+        guardianEmail TEXT NOT NULL,
+        joinedAt TEXT DEFAULT (datetime('now')),
+        UNIQUE(roomCode, guardianEmail) ON CONFLICT IGNORE
       )
     ''');
   }
@@ -154,20 +187,29 @@ class ActivityDatabase {
     return '${ms % 9000 + 1000}-${(ms ~/ 13) % 90 + 10}';
   }
 
-  Future<Map<String, dynamic>?> getTeacherProfile() async {
+  /// Fetches teacher profile from teacher_data.db, matched by email.
+  Future<Map<String, dynamic>?> getTeacherProfile({String? email}) async {
     try {
       final db = await instance.database;
-      final maps = await db.query('users', where: 'role = ?', whereArgs: ['Teacher'], limit: 1);
+      final maps = email != null
+          ? await db.query('users', where: 'email = ? AND role = ?', whereArgs: [email, 'Teacher'], limit: 1)
+          : await db.query('users', where: 'role = ?', whereArgs: ['Teacher'], limit: 1);
 
       if (maps.isNotEmpty) {
         final data = maps.first;
+        String teacherId = (data['teacher_id'] ?? '').toString().trim();
+        if (teacherId.isEmpty) {
+          teacherId = _generateTeacherId();
+          await db.update('users', {'teacher_id': teacherId}, where: 'id = ?', whereArgs: [data['id']]);
+        }
         return {
-          'teacherId': data['teacher_id'] ?? _generateTeacherId(),
+          'teacherId': teacherId,
           'name': '${data['firstName']} ${data['lastName']}',
-          'email': data['email'],
-          'phone': data['phone'] ?? '',
-          'subject': data['subject'] ?? '',
-          'advisoryClass': data['advisoryClass'] ?? '',
+          'email': (data['email'] ?? '').toString(),
+          'phone': (data['phone'] ?? '').toString(),
+          'subject': (data['subject'] ?? '').toString(),
+          'advisoryClass': (data['advisoryClass'] ?? '').toString(),
+          'profileImage': (data['profile_image'] ?? '').toString(),
         };
       }
       return null;
@@ -176,23 +218,66 @@ class ActivityDatabase {
     }
   }
 
-  Future<int> updateTeacherProfile(Map<String, dynamic> profile) async {
+  /// Fetches teacher info from admin's user_data.db by email.
+  Future<Map<String, dynamic>?> getTeacherFromAdminDB(String email) async {
+    try {
+      final dbPath = await getDatabasesPath();
+      final path = join(dbPath, 'user_data.db');
+      final adminDb = await openDatabase(path);
+
+      final maps = await adminDb.query('users', where: 'email = ?', whereArgs: [email], limit: 1);
+
+      if (maps.isNotEmpty) {
+        final data = maps.first;
+        final firstName = (data['firstName'] ?? '').toString().trim();
+        final middleName = (data['middleName'] ?? '').toString().trim();
+        final lastName = (data['lastName'] ?? '').toString().trim();
+        final fullName = [firstName, if (middleName.isNotEmpty) middleName, lastName]
+            .where((s) => s.isNotEmpty).join(' ');
+        return {
+          'teacherId': _generateTeacherId(),
+          'name': fullName,
+          'email': (data['email'] ?? email).toString(),
+          'phone': '',
+          'subject': '',
+          'advisoryClass': '',
+        };
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Saves teacher profile to teacher_data.db.
+  /// Updates existing record by email, or inserts new one if none exists.
+  Future<void> updateTeacherProfile(Map<String, dynamic> profile) async {
     final db = await instance.database;
-    List<String> nameParts = (profile['name'] as String).split(' ');
-    String fName = nameParts.isNotEmpty ? nameParts[0] : '';
-    String lName = nameParts.length > 1 ? nameParts.sublist(1).join(' ') : '';
+
+    final nameParts = (profile['name'] as String? ?? '').trim().split(' ');
+    final fName = nameParts.isNotEmpty ? nameParts[0] : '';
+    final lName = nameParts.length > 1 ? nameParts.sublist(1).join(' ') : '';
+    final email = (profile['email'] ?? '').toString().trim();
+
+    String teacherId = (profile['teacherId'] ?? '').toString().trim();
+    if (teacherId.isEmpty) teacherId = _generateTeacherId();
 
     final rowData = {
       'firstName': fName,
       'lastName': lName,
-      'email': profile['email'],
-      'phone': profile['phone'],
-      'subject': profile['subject'] ?? '',
-      'advisoryClass': profile['advisoryClass'],
-      'teacher_id': profile['teacherId'],
+      'email': email,
+      'phone': (profile['phone'] ?? '').toString().trim(),
+      'subject': (profile['subject'] ?? '').toString().trim(),
+      'advisoryClass': (profile['advisoryClass'] ?? '').toString().trim(),
+      'teacher_id': teacherId,
+      'role': 'Teacher',
+      'profile_image': (profile['profileImage'] ?? '').toString(),
     };
 
-    return await db.update('users', rowData, where: 'teacher_id = ?', whereArgs: [profile['teacherId']]);
+    final rowsAffected = await db.update('users', rowData, where: 'email = ?', whereArgs: [email]);
+    if (rowsAffected == 0) {
+      await db.insert('users', {'password': 'changeme', 'middleName': '', ...rowData});
+    }
   }
 
   // --- ACTIVITY & ANNOUNCEMENT METHODS ---
@@ -217,8 +302,231 @@ class ActivityDatabase {
     return await db.query('announcements', orderBy: 'id DESC');
   }
 
+  // --- ROOM METHODS ---
+
+  String _generateRoomCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final random = DateTime.now().millisecondsSinceEpoch;
+    String code = '';
+    int seed = random;
+    for (int i = 0; i < 6; i++) {
+      seed = (seed * 1664525 + 1013904223) & 0xFFFFFFFF; // LCG
+      code += chars[seed % chars.length];
+    }
+    return code;
+  }
+
+  Future<Map<String, dynamic>?> createRoom(String title, String teacherEmail) async {
+    try {
+      final db = await instance.database;
+
+      // Verify rooms table exists
+      final tables = await db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='rooms'");
+      debugPrint('createRoom: rooms table exists = ${tables.isNotEmpty}');
+
+      String code = _generateRoomCode();
+      while (true) {
+        final existing = await db.query('rooms', where: 'code = ?', whereArgs: [code], limit: 1);
+        if (existing.isEmpty) break;
+        code = _generateRoomCode();
+      }
+
+      final id = await db.insert('rooms', {
+        'title': title,
+        'code': code,
+        'teacherEmail': teacherEmail,
+      });
+      debugPrint('createRoom: inserted row id=$id, title="$title", code=$code, email=$teacherEmail');
+
+      // Verify it was saved
+      final verify = await db.query('rooms');
+      debugPrint('createRoom: all rooms after insert = $verify');
+
+      return {'title': title, 'code': code, 'teacherEmail': teacherEmail};
+    } catch (e) {
+      debugPrint('createRoom ERROR: $e');
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> getRoomByTeacher(String teacherEmail) async {
+    try {
+      final db = await instance.database;
+      final maps = await db.query('rooms', where: 'teacherEmail = ?', whereArgs: [teacherEmail], limit: 1);
+      return maps.isNotEmpty ? maps.first : null;
+    } catch (_) { return null; }
+  }
+
+  /// Returns ALL rooms created by this teacher
+  Future<List<Map<String, dynamic>>> getRoomsByTeacher(String teacherEmail) async {
+    try {
+      final db = await instance.database;
+      return await db.query('rooms', where: 'teacherEmail = ?', whereArgs: [teacherEmail], orderBy: 'id DESC');
+    } catch (_) { return []; }
+  }
+
+  Future<Map<String, dynamic>?> getRoomByCode(String code) async {
+    try {
+      final db = await instance.database;
+      final maps = await db.query('rooms', where: 'code = ?', whereArgs: [code.toUpperCase().trim()], limit: 1);
+      debugPrint('getRoomByCode: code=$code, found=${maps.length} rows');
+      return maps.isNotEmpty ? maps.first : null;
+    } catch (e) {
+      debugPrint('getRoomByCode error: $e');
+      return null;
+    }
+  }
+
+  Future<bool> joinRoom(String code, String guardianEmail) async {
+    try {
+      final db = await instance.database;
+
+      // Debug: show all rooms in DB
+      final allRooms = await db.query('rooms');
+      debugPrint('joinRoom DEBUG: all rooms in DB = $allRooms');
+      debugPrint('joinRoom DEBUG: looking for code = "${code.toUpperCase().trim()}"');
+
+      // Ensure rooms and room_members tables exist in this DB session
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS rooms (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          code TEXT NOT NULL UNIQUE,
+          teacherEmail TEXT NOT NULL,
+          createdAt TEXT DEFAULT (datetime('now'))
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS room_members (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          roomCode TEXT NOT NULL,
+          guardianEmail TEXT NOT NULL,
+          joinedAt TEXT DEFAULT (datetime('now')),
+          UNIQUE(roomCode, guardianEmail) ON CONFLICT IGNORE
+        )
+      ''');
+
+      final room = await getRoomByCode(code);
+      debugPrint('joinRoom: room found = ${room != null}');
+      if (room == null) return false;
+
+      await db.insert('room_members', {
+        'roomCode': code.toUpperCase().trim(),
+        'guardianEmail': guardianEmail,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      debugPrint('joinRoom: inserted member $guardianEmail into room $code');
+      return true;
+    } catch (e) {
+      debugPrint('joinRoom error: $e');
+      return false;
+    }
+  }
+
+  Future<Map<String, dynamic>?> getJoinedRoom(String guardianEmail) async {
+    try {
+      final db = await instance.database;
+
+      // Ensure tables exist
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS rooms (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          code TEXT NOT NULL UNIQUE,
+          teacherEmail TEXT NOT NULL,
+          createdAt TEXT DEFAULT (datetime('now'))
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS room_members (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          roomCode TEXT NOT NULL,
+          guardianEmail TEXT NOT NULL,
+          joinedAt TEXT DEFAULT (datetime('now')),
+          UNIQUE(roomCode, guardianEmail) ON CONFLICT IGNORE
+        )
+      ''');
+
+      final maps = await db.rawQuery('''
+        SELECT r.* FROM rooms r
+        JOIN room_members rm ON r.code = rm.roomCode
+        WHERE rm.guardianEmail = ?
+        LIMIT 1
+      ''', [guardianEmail]);
+      debugPrint('getJoinedRoom: guardianEmail=$guardianEmail, found=${maps.length} rows');
+      return maps.isNotEmpty ? maps.first : null;
+    } catch (e) {
+      debugPrint('getJoinedRoom error: $e');
+      return null;
+    }
+  }
+
+  Future<void> leaveRoom(String guardianEmail) async {
+    try {
+      final db = await instance.database;
+      await db.delete('room_members', where: 'guardianEmail = ?', whereArgs: [guardianEmail]);
+    } catch (_) {}
+  }
+
+  /// Returns list of guardians (with name + email) who joined the teacher's room.
+  Future<List<Map<String, dynamic>>> getRoomMembers(String teacherEmail) async {
+    try {
+      final db = await instance.database;
+      final room = await getRoomByTeacher(teacherEmail);
+      if (room == null) return [];
+
+      final members = await db.query('room_members', where: 'roomCode = ?', whereArgs: [room['code']]);
+      if (members.isEmpty) return [];
+
+      final adminDbPath = join(await getDatabasesPath(), 'user_data.db');
+      final adminDb = await openDatabase(adminDbPath);
+
+      final List<Map<String, dynamic>> result = [];
+      for (final member in members) {
+        final email = member['guardianEmail'].toString();
+        final users = await adminDb.query('users', where: 'email = ?', whereArgs: [email], limit: 1);
+        if (users.isNotEmpty) {
+          final u = users.first;
+          final firstName = (u['firstName'] ?? '').toString().trim();
+          final middleName = (u['middleName'] ?? '').toString().trim();
+          final lastName = (u['lastName'] ?? '').toString().trim();
+          final fullName = [firstName, if (middleName.isNotEmpty) middleName, lastName]
+              .where((s) => s.isNotEmpty).join(' ');
+          result.add({'name': fullName, 'email': email});
+        } else {
+          result.add({'name': email, 'email': email});
+        }
+      }
+      return result;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> deleteRoom(String teacherEmail) async {
+    try {
+      final db = await instance.database;
+      final room = await getRoomByTeacher(teacherEmail);
+      if (room != null) {
+        await db.delete('room_members', where: 'roomCode = ?', whereArgs: [room['code']]);
+        await db.delete('rooms', where: 'teacherEmail = ?', whereArgs: [teacherEmail]);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> deleteRoomByCode(String code) async {
+    try {
+      final db = await instance.database;
+      await db.delete('room_members', where: 'roomCode = ?', whereArgs: [code]);
+      await db.delete('rooms', where: 'code = ?', whereArgs: [code]);
+    } catch (e) {
+      debugPrint('deleteRoomByCode error: $e');
+    }
+  }
+
   Future close() async {
-    final db = await instance.database;
-    db.close();
+    if (_database != null) {
+      await _database!.close();
+      _database = null; // Will reopen on next access, re-running _ensureTables
+    }
   }
 }

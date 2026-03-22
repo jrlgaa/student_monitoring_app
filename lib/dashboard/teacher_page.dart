@@ -658,7 +658,9 @@ class _TeacherPageState extends State<TeacherPage> {
     );
   }
 
-  void _saveGrade(String student, String activityKey, String gradeText) {
+  // Inside _TeacherPageState in teacher_page.dart:
+
+  void _saveGrade(String student, String activityKey, String gradeText) async {
     double? score = double.tryParse(gradeText);
 
     if (score != null && (score < 0 || score > 100)) {
@@ -668,17 +670,33 @@ class _TeacherPageState extends State<TeacherPage> {
       return;
     }
 
-    setState(() {
-      _studentGrades[student]![activityKey]!['grade'] = score;
-      String currentStatus = _studentGrades[student]![activityKey]!['status'] ?? 'Pending';
-      if (score != null && currentStatus == 'Pending') {
-        _studentGrades[student]![activityKey]!['status'] = 'Completed';
-      }
-    });
+    String currentStatus = _studentGrades[student]![activityKey]!['status'] ?? 'Pending';
+    if (score != null && currentStatus == 'Pending') {
+      currentStatus = 'Completed';
+    }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Saved: ${score?.toStringAsFixed(0) ?? "0"} for $student')),
-    );
+    try {
+      // PERSIST TO DATABASE
+      await ActivityDatabase.instance.saveStudentGrade(
+          student,
+          activityKey,
+          score,
+          currentStatus
+      );
+
+      setState(() {
+        _studentGrades[student]![activityKey]!['grade'] = score;
+        _studentGrades[student]![activityKey]!['status'] = currentStatus;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved: ${score?.toStringAsFixed(0) ?? "0"} for $student')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error saving to database: $e')),
+      );
+    }
   }
 
   void _showUploadModal(BuildContext context) {
@@ -846,9 +864,9 @@ class _TeacherPageState extends State<TeacherPage> {
 
   // UPDATED: Fetches profile and content from the database
   Future<void> _fetchDatabaseContent() async {
-    // Fallback profile used when DB has no teacher record or throws an error
+    // Fallback profile
     final fallbackProfile = {
-      'teacherId': _generateTeacherId(),
+      'teacherId': '4821-37', // Static fallback for consistency
       'name': 'Ryan Caesar Mendoza',
       'email': 'rycaesarmendoza@deped.gov.ph',
       'phone': '09123456789',
@@ -859,25 +877,24 @@ class _TeacherPageState extends State<TeacherPage> {
     Map<String, dynamic>? profileData;
     List<Map<String, dynamic>> data = [];
     List<Map<String, dynamic>> announcementData = [];
+    List<Map<String, dynamic>> savedGrades = [];
 
     try {
-      // 1. Fetch Teacher Profile from DB
+      // 1. Fetch Teacher Profile, Activities, and Announcements
       profileData = await ActivityDatabase.instance.getTeacherProfile();
-
-      // 2. Fetch Activities and Announcements
       data = await ActivityDatabase.instance.getActivities();
       announcementData = await ActivityDatabase.instance.getAnnouncements();
+
+      // 2. NEW: Fetch all saved grades from the database
+      savedGrades = await ActivityDatabase.instance.getAllGrades();
     } catch (e) {
       debugPrint("Error loading data: $e");
-      // profileData stays null — fallback will be used below
     }
 
-    // Always call setState so the UI exits "Loading..." regardless of DB outcome
     setState(() {
       final profile = profileData ?? fallbackProfile;
       teacherProfile = Map<String, dynamic>.from(profile);
 
-      // Sync text controllers with whatever profile data we have
       _nameController.text = teacherProfile['name'] ?? '';
       _emailController.text = teacherProfile['email'] ?? '';
       _phoneController.text = teacherProfile['phone'] ?? '';
@@ -885,11 +902,37 @@ class _TeacherPageState extends State<TeacherPage> {
 
       _activities = List<Map<String, dynamic>>.from(data);
       _announcements = List<Map<String, dynamic>>.from(announcementData);
-    });
 
-    for (var activity in _activities) {
-      _initNewActivityForAllStudents(activity);
-    }
+      // 3. Initialize students with activity placeholders
+      for (var activity in _activities) {
+        _initNewActivityForAllStudents(activity);
+      }
+
+      // 4. NEW: Overwrite placeholders with actual saved grades from DB
+      for (var row in savedGrades) {
+        String sName = row['studentName'];
+        String aKey = row['activityKey'];
+        double? score = row['grade'];
+        String status = row['status'] ?? 'Pending';
+
+        // Ensure the student entry exists in our local maps
+        _studentGrades[sName] ??= {};
+        _gradeControllers[sName] ??= {};
+
+        // Update the grade map
+        _studentGrades[sName]![aKey] = {
+          'grade': score,
+          'maxScore': 100.0, // Or your preferred default
+          'status': status,
+        };
+
+        // Update the text controller so the score shows up in the TextField
+        if (_gradeControllers[sName]![aKey] == null) {
+          _gradeControllers[sName]![aKey] = TextEditingController();
+        }
+        _gradeControllers[sName]![aKey]!.text = score?.toStringAsFixed(0) ?? "";
+      }
+    });
   }
 
   String _getCurrentDate() {

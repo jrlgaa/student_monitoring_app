@@ -27,7 +27,7 @@ class ActivityDatabase {
   }
 
   Future _ensureTables(Database db) async {
-    // 1. Users table (Teachers/Staff)
+    // 1. Users table
     await db.execute('''
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,11 +43,6 @@ class ActivityDatabase {
         teacher_id TEXT
       )
     ''');
-
-    // Migration for teacher_id column
-    try {
-      await db.execute('ALTER TABLE users ADD COLUMN teacher_id TEXT');
-    } catch (_) {}
 
     // 2. Activities table
     await db.execute('''
@@ -71,8 +66,7 @@ class ActivityDatabase {
       )
     ''');
 
-    // 4. STUDENT GRADES TABLE (New)
-    // UNIQUE constraint ensures one grade per student per activity
+    // 4. Student Grades table
     await db.execute('''
       CREATE TABLE IF NOT EXISTS student_grades (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,15 +77,52 @@ class ActivityDatabase {
         UNIQUE(studentName, activityKey) ON CONFLICT REPLACE
       )
     ''');
+
+    // 5. Attendance table
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS attendance (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        studentName TEXT NOT NULL,
+        date TEXT NOT NULL,
+        status TEXT NOT NULL,
+        UNIQUE(studentName, date) ON CONFLICT REPLACE
+      )
+    ''');
   }
 
   Future _createDB(Database db, int version) async {
     await _ensureTables(db);
   }
 
+  // --- ATTENDANCE METHODS ---
+
+  Future<int> saveAttendance(String name, String date, String status) async {
+    final db = await instance.database;
+    return await db.insert('attendance', {
+      'studentName': name,
+      'date': date,
+      'status': status,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// Returns a Map where key is studentName and value is status (e.g., 'Present')
+  Future<Map<String, String>> getAttendanceByDate(String date) async {
+    final db = await instance.database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'attendance',
+      where: 'date = ?',
+      whereArgs: [date],
+    );
+
+    // Convert the List of maps into a single Map for easier UI lookup
+    return {
+      for (var item in maps)
+        item['studentName'] as String : item['status'] as String
+    };
+  }
+
   // --- GRADE PERSISTENCE METHODS ---
 
-  /// Saves or updates a student's grade for a specific activity
   Future<int> saveStudentGrade(String name, String key, double? grade, String status) async {
     final db = await instance.database;
     return await db.insert('student_grades', {
@@ -102,13 +133,11 @@ class ActivityDatabase {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  /// Fetches all saved grades to populate the Teacher Progress UI
   Future<List<Map<String, dynamic>>> getAllGrades() async {
     final db = await instance.database;
     return await db.query('student_grades');
   }
 
-  /// Deletes grades associated with a specific activity (used when an activity is removed)
   Future<int> deleteGradesByActivity(String activityKey) async {
     final db = await instance.database;
     return await db.delete(
@@ -122,9 +151,7 @@ class ActivityDatabase {
 
   String _generateTeacherId() {
     final ms = DateTime.now().millisecondsSinceEpoch;
-    final fourDigit = (ms % 9000 + 1000).toString().padLeft(4, '0');
-    final twoDigit = ((ms ~/ 13) % 90 + 10).toString().padLeft(2, '0');
-    return '$fourDigit-$twoDigit';
+    return '${ms % 9000 + 1000}-${(ms ~/ 13) % 90 + 10}';
   }
 
   Future<Map<String, dynamic>?> getTeacherProfile() async {
@@ -134,13 +161,8 @@ class ActivityDatabase {
 
       if (maps.isNotEmpty) {
         final data = maps.first;
-        String teacherId = (data['teacher_id'] ?? '').toString().trim();
-        if (teacherId.isEmpty) {
-          teacherId = _generateTeacherId();
-          await db.update('users', {'teacher_id': teacherId}, where: 'id = ?', whereArgs: [data['id']]);
-        }
         return {
-          'teacherId': teacherId,
+          'teacherId': data['teacher_id'] ?? _generateTeacherId(),
           'name': '${data['firstName']} ${data['lastName']}',
           'email': data['email'],
           'phone': data['phone'] ?? '',
@@ -159,7 +181,6 @@ class ActivityDatabase {
     List<String> nameParts = (profile['name'] as String).split(' ');
     String fName = nameParts.isNotEmpty ? nameParts[0] : '';
     String lName = nameParts.length > 1 ? nameParts.sublist(1).join(' ') : '';
-    final String teacherId = profile['teacherId']?.toString() ?? '';
 
     final rowData = {
       'firstName': fName,
@@ -168,23 +189,10 @@ class ActivityDatabase {
       'phone': profile['phone'],
       'subject': profile['subject'] ?? '',
       'advisoryClass': profile['advisoryClass'],
-      'teacher_id': teacherId,
+      'teacher_id': profile['teacherId'],
     };
 
-    int rowsAffected = 0;
-    if (teacherId.isNotEmpty) {
-      rowsAffected = await db.update('users', rowData, where: 'teacher_id = ?', whereArgs: [teacherId]);
-    }
-
-    if (rowsAffected == 0) {
-      return await db.insert('users', {
-        ...rowData,
-        'role': 'Teacher',
-        'password': 'changeme',
-        'middleName': '',
-      });
-    }
-    return rowsAffected;
+    return await db.update('users', rowData, where: 'teacher_id = ?', whereArgs: [profile['teacherId']]);
   }
 
   // --- ACTIVITY & ANNOUNCEMENT METHODS ---

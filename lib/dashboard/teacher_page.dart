@@ -1212,11 +1212,27 @@ class _TeacherPageState extends State<TeacherPage> {
   int _getCountForStatus(Map<int, String> attendanceMap, String status) => attendanceMap.values.where((s) => s == status).length;
 
   Future<void> _selectAttendanceDate(BuildContext context) async {
-    final DateTime? picked = await showDatePicker(context: context, initialDate: _selectedAttendanceDate, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
-    if (picked != null && picked != _selectedAttendanceDate) {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedAttendanceDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+    );
+
+    if (picked != null) {
+      final dateKey = _getDateKey(picked);
+      final savedAttendance = await ActivityDatabase.instance.getAttendanceByDate(dateKey);
+
       setState(() {
         _selectedAttendanceDate = picked;
-        _currentAttendance = {};
+        _currentAttendance.clear();
+
+        // Map database names back to indices for your UI list
+        for (int i = 0; i < students.length; i++) {
+          if (savedAttendance.containsKey(students[i])) {
+            _currentAttendance[i] = savedAttendance[students[i]]!;
+          }
+        }
       });
     }
   }
@@ -1226,10 +1242,22 @@ class _TeacherPageState extends State<TeacherPage> {
     setState(() => _attendanceRecords[key] = {for (var i = 0; i < students.length; i++) i: 'Present'});
   }
 
-  void _saveAttendance() {
-    final key = _getDateKey(_selectedAttendanceDate);
-    setState(() => _attendanceRecords[key] = Map.from(_currentAttendance));
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Attendance saved for ${_formatDate(_selectedAttendanceDate)}')));
+  void _saveAttendance() async {
+    // Use the helper from your screenshot
+    final dateKey = _getDateKey(_selectedAttendanceDate);
+
+    for (int i = 0; i < students.length; i++) {
+      // Assuming 'students' is a List<String> of names
+      String name = students[i];
+      String status = _currentAttendance[i] ?? 'Absent';
+
+      // This will now work because we added saveAttendance to DatabaseHelper
+      await ActivityDatabase.instance.saveAttendance(name, dateKey, status);
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Attendance saved for $dateKey')),
+    );
   }
 
   Widget _buildAttendanceSummary(Map<int, String> attendanceMap) {

@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 5, // Incremented to version 5 for new tables
+      version: 4, // Reverted to version 4 as attendance/grades are removed
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -36,11 +36,6 @@ class DatabaseHelper {
       // Recreate students table to ensure LRN is INTEGER
       await db.execute("DROP TABLE IF EXISTS students");
       await _createStudentsTable(db);
-    }
-    if (oldVersion < 5) {
-      // Add Attendance and Grades tables for systemic integration
-      await _createAttendanceTable(db);
-      await _createGradesTable(db);
     }
   }
 
@@ -59,8 +54,6 @@ class DatabaseHelper {
     ''');
 
     await _createStudentsTable(db);
-    await _createAttendanceTable(db);
-    await _createGradesTable(db);
   }
 
   Future _createStudentsTable(Database db) async {
@@ -73,31 +66,6 @@ class DatabaseHelper {
         lrn INTEGER NOT NULL,
         grade TEXT NOT NULL,
         status TEXT DEFAULT 'Active'
-      )
-    ''');
-  }
-
-  Future _createAttendanceTable(Database db) async {
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS attendance (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        studentName TEXT NOT NULL,
-        date TEXT NOT NULL,
-        status TEXT NOT NULL,
-        UNIQUE(studentName, date) ON CONFLICT REPLACE
-      )
-    ''');
-  }
-
-  Future _createGradesTable(Database db) async {
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS student_grades (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        studentName TEXT NOT NULL,
-        activityKey TEXT NOT NULL,
-        grade REAL,
-        status TEXT,
-        UNIQUE(studentName, activityKey) ON CONFLICT REPLACE
       )
     ''');
   }
@@ -195,25 +163,5 @@ class DatabaseHelper {
   Future<int> deleteStudent(int id) async {
     final db = await instance.database;
     return await db.delete('students', where: 'id = ?', whereArgs: [id]);
-  }
-
-  // --- DATA SYNC METHODS (For Attendance and Grades) ---
-  Future<int> saveAttendance(String name, String date, String status) async {
-    final db = await instance.database;
-    return await db.insert('attendance', {
-      'studentName': name,
-      'date': date,
-      'status': status,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-  }
-
-  Future<int> saveGrade(String name, String key, double? grade, String status) async {
-    final db = await instance.database;
-    return await db.insert('student_grades', {
-      'studentName': name,
-      'activityKey': key,
-      'grade': grade,
-      'status': status,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 }

@@ -21,20 +21,21 @@ dependencies:
   firebase_auth: ^6.2.0
   cloud_firestore: ^6.1.3
   image_cropper: ^11.0.0
+  http: ^1.2.0          # ✅ ADDED — required by signup_page.dart for email verification API calls
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  flutter_launcher_icons: ^0.13.1   # ✅ ADDED
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
 
   assets:
-    - lib/assets/Logo_app.png   # ✅ OPTIONAL but recommended
+    - lib/assets/Logo_app.png
 
-# ✅ MUST BE OUTSIDE "flutter"
+# Must be outside "flutter" block
 flutter_icons:
   android: true
   ios: true

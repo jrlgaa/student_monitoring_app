@@ -60,16 +60,12 @@ class _TeacherPageState extends State<TeacherPage> {
   late final TextEditingController _advisoryClassController;
 
   final List<String> menuTitles = [
-    'Activities',
     'Rooms',
-    'Announcements',
     'Attendance',
   ];
 
   final List<IconData> menuIcons = [
-    Icons.folder,
     Icons.meeting_room_outlined,
-    Icons.campaign,
     Icons.calendar_month,
   ];
 
@@ -89,6 +85,9 @@ class _TeacherPageState extends State<TeacherPage> {
 
   // Room state
   List<Map<String, dynamic>> _rooms = [];
+  Map<String, dynamic>? _selectedAttendanceRoom;
+  // Students per room: roomCode -> list of student names
+  Map<String, List<String>> _roomStudents = {};
   final TextEditingController _roomTitleController = TextEditingController();
 
   @override
@@ -316,23 +315,7 @@ class _TeacherPageState extends State<TeacherPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      floatingActionButton: selectedIndex == 0
-          ? FloatingActionButton.extended(
-        onPressed: () => _showUploadModal(context),
-        label: const Text('Upload Activity'),
-        icon: const Icon(Icons.add),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
-      )
-          : selectedIndex == 2
-          ? FloatingActionButton.extended(
-        onPressed: () => _showAnnouncementModal(context),
-        label: const Text('Post Announcement'),
-        icon: const Icon(Icons.add),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
-      )
-          : null,
+      floatingActionButton: null,
       body: SafeArea(
         child: Stack(
           children: [
@@ -411,10 +394,13 @@ class _TeacherPageState extends State<TeacherPage> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: ListTile(
-                          title: const Text("Dark Mode"),
+                          leading: Icon(widget.isDarkMode ? Icons.light_mode : Icons.dark_mode, color: widget.isDarkMode ? const Color(0xFFFFE082) : Colors.black54),
+                          title: Text(widget.isDarkMode ? "Light Mode" : "Dark Mode", style: TextStyle(color: widget.isDarkMode ? const Color(0xFFFFE082) : null)),
                           trailing: Switch(
                             value: widget.isDarkMode,
                             onChanged: (_) => widget.toggleTheme(),
+                            activeColor: widget.isDarkMode ? const Color(0xFFFFE082) : null,
+                            activeTrackColor: widget.isDarkMode ? const Color(0xFFFFE082).withOpacity(0.4) : null,
                           ),
                         ),
                       ),
@@ -443,15 +429,25 @@ class _TeacherPageState extends State<TeacherPage> {
                   onPressed: () => setState(() => isSidebarOpen = true),
                 ),
               ),
-            // Profile avatar top-right — taps to Profile section
-            if (!isSidebarOpen)
-              Positioned(
-                top: 10,
-                right: 16,
-                child: GestureDetector(
-                  onTap: () => setState(() => selectedIndex = 4),
+            // Profile avatar top-right — always visible, sidebar slides from left so no overlap
+            Positioned(
+              top: 7,
+              right: 16,
+              child: GestureDetector(
+                onTap: () => setState(() { selectedIndex = 4; isSidebarOpen = false; }),
+                child: Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: widget.isDarkMode ? Colors.white38 : Colors.black,
+                      width: 2.5,
+                    ),
+                    color: widget.isDarkMode ? Colors.grey[800] : Colors.white,
+                  ),
+                  padding: const EdgeInsets.all(3),
                   child: CircleAvatar(
-                    radius: 20,
                     backgroundColor: Colors.blue,
                     backgroundImage: _profileImagePath != null
                         ? FileImage(File(_profileImagePath!))
@@ -462,6 +458,7 @@ class _TeacherPageState extends State<TeacherPage> {
                   ),
                 ),
               ),
+            ),
           ],
         ),
       ),
@@ -476,9 +473,10 @@ class _TeacherPageState extends State<TeacherPage> {
         title: const Text('Create Room'),
         content: TextField(
           controller: _roomTitleController,
+          textCapitalization: TextCapitalization.characters,
           decoration: const InputDecoration(
             labelText: 'Room Title',
-            hintText: 'e.g. Grade 3 - Section A',
+            hintText: 'e.g. GRADE 3 - SECTION A',
             border: OutlineInputBorder(),
           ),
           autofocus: true,
@@ -492,7 +490,9 @@ class _TeacherPageState extends State<TeacherPage> {
               Navigator.pop(ctx);
               final room = await ActivityDatabase.instance.createRoom(title, widget.loggedInEmail);
               if (room != null) {
-                setState(() => _rooms.insert(0, room));
+                // Reload from DB to get full row with id
+                final updatedRooms = await ActivityDatabase.instance.getRoomsByTeacher(widget.loggedInEmail);
+                setState(() => _rooms = updatedRooms);
                 if (mounted) _showRoomCodeDialog(room);
               }
             },
@@ -553,7 +553,8 @@ class _TeacherPageState extends State<TeacherPage> {
             onPressed: () async {
               Navigator.pop(ctx);
               await ActivityDatabase.instance.deleteRoomByCode(r['code']);
-              setState(() => _rooms.removeWhere((rm) => rm['code'] == r['code']));
+              final updatedRooms = await ActivityDatabase.instance.getRoomsByTeacher(widget.loggedInEmail);
+              setState(() => _rooms = updatedRooms);
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Room deleted.')));
               }
@@ -568,12 +569,13 @@ class _TeacherPageState extends State<TeacherPage> {
 
   Widget _roomsSection() {
     return Stack(
+      clipBehavior: Clip.none,
       children: [
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(72, 16, 16, 8),
+              padding: const EdgeInsets.fromLTRB(72, 16, 80, 8),
               child: const Text('Rooms', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
             ),
 
@@ -646,86 +648,6 @@ class _TeacherPageState extends State<TeacherPage> {
                   },
                 ),
               ),
-
-            // Student progress section
-            if (students.isNotEmpty) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                child: Text('Student Progress', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.grey[700])),
-              ),
-              SizedBox(
-                height: 300,
-                child: ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: students.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, sIndex) {
-                    final student = students[sIndex];
-                    double totalScore = 0;
-                    int gradedCount = 0;
-                    _studentGrades[student]?.forEach((key, data) {
-                      if (data['grade'] != null) { totalScore += data['grade']; gradedCount++; }
-                    });
-                    final summaryText = gradedCount > 0
-                        ? "Summary: ${(totalScore / (gradedCount * 100) * 100).toStringAsFixed(0)}%"
-                        : "Grade Summary: 0%";
-                    return Card(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      child: ExpansionTile(
-                        leading: CircleAvatar(backgroundColor: Colors.blue.shade100, child: Text(student.substring(0, 1).toUpperCase())),
-                        title: Text(student, style: const TextStyle(fontWeight: FontWeight.w600)),
-                        subtitle: Text('${_activities.length} total activities'),
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              children: [
-                                ..._activities.map((activity) {
-                                  final key = _getActivityKey(activity);
-                                  final gradeData = _studentGrades[student]?[key] ?? {};
-                                  final controller = _gradeControllers[student]?[key] ?? TextEditingController();
-                                  final score = gradeData['grade'] ?? 0.0;
-                                  final percentage = "${((score / _defaultMaxScore) * 100).toStringAsFixed(0)}%";
-                                  return Container(
-                                    margin: const EdgeInsets.only(bottom: 12),
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
-                                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                                        Expanded(child: Text(activity['title'], style: const TextStyle(fontWeight: FontWeight.w600))),
-                                        DropdownButton<String>(
-                                          value: gradeData['status'] ?? 'Pending',
-                                          underline: const SizedBox(),
-                                          items: ['Pending', 'Completed', 'Late', 'Missed'].map((v) => DropdownMenuItem(value: v, child: Text(v, style: TextStyle(fontSize: 12, color: v == 'Missed' ? Colors.red : v == 'Late' ? Colors.orange.shade700 : v == 'Completed' ? Colors.green : Colors.orange)))).toList(),
-                                          onChanged: (newValue) {
-                                            setState(() {
-                                              _studentGrades[student]![key]!['status'] = newValue;
-                                              if (newValue == 'Missed') { _studentGrades[student]![key]!['grade'] = 0.0; controller.text = "0"; }
-                                            });
-                                          },
-                                        ),
-                                      ]),
-                                      const SizedBox(height: 8),
-                                      Row(children: [
-                                        Expanded(child: TextField(controller: controller, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: 'Score', suffixText: '/ 100', border: const OutlineInputBorder(), helperText: 'Percentage: $percentage'))),
-                                        const SizedBox(width: 8),
-                                        IconButton(icon: const Icon(Icons.save, color: Colors.blue), onPressed: () => _saveGrade(student, key, controller.text)),
-                                      ]),
-                                    ]),
-                                  );
-                                }).toList(),
-                                const Divider(),
-                                Row(mainAxisAlignment: MainAxisAlignment.end, children: [Text(summaryText, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blue))]),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
           ],
         ),
 
@@ -733,11 +655,13 @@ class _TeacherPageState extends State<TeacherPage> {
         Positioned(
           bottom: 24,
           right: 24,
-          child: FloatingActionButton(
+          child: FloatingActionButton.extended(
+            heroTag: 'createRoomFAB',
             onPressed: _showCreateRoomDialog,
             backgroundColor: Colors.blue,
             foregroundColor: Colors.white,
-            child: const Icon(Icons.add),
+            icon: const Icon(Icons.add),
+            label: const Text('New Room'),
           ),
         ),
       ],
@@ -745,18 +669,36 @@ class _TeacherPageState extends State<TeacherPage> {
   }
 
   void _enterRoom(Map<String, dynamic> room) {
+    final code = room['code'].toString();
+    final roomSpecificStudents = _roomStudents[code] ?? [];
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => RoomDetailPage(
           room: room,
-          students: students,
+          students: roomSpecificStudents,
+          studentLrns: const {},
           activities: _activities,
+          announcements: _announcements,
           studentGrades: _studentGrades,
           gradeControllers: _gradeControllers,
           defaultMaxScore: _defaultMaxScore,
           isDarkMode: widget.isDarkMode,
           onSaveGrade: _saveGrade,
+          onStatusChange: (student, key, status) {
+            setState(() {
+              _studentGrades[student] ??= {};
+              _studentGrades[student]![key] ??= {};
+              _studentGrades[student]![key]!['status'] = status;
+            });
+          },
+          onActivityAdded: (activity) {
+            setState(() => _activities = [activity, ..._activities]);
+            _initNewActivityForAllStudents(activity);
+          },
+          onAnnouncementAdded: (ann) {
+            setState(() => _announcements = [ann, ..._announcements]);
+          },
         ),
       ),
     );
@@ -925,11 +867,12 @@ class _TeacherPageState extends State<TeacherPage> {
                     };
 
                     try {
-                      await ActivityDatabase.instance.insertActivity(activityData);
+                      final insertedId = await ActivityDatabase.instance.insertActivity(activityData);
+                      final withId = {...activityData, 'id': insertedId};
                       setState(() {
-                        _activities.insert(0, activityData);
+                        _activities.insert(0, withId);
                       });
-                      _initNewActivityForAllStudents(activityData);
+                      _initNewActivityForAllStudents(withId);
 
                       if (mounted) {
                         Navigator.pop(context);
@@ -1015,12 +958,17 @@ class _TeacherPageState extends State<TeacherPage> {
         final rooms = await ActivityDatabase.instance.getRoomsByTeacher(widget.loggedInEmail);
         if (rooms.isNotEmpty) {
           setState(() => _rooms = rooms);
-          // Load all members from all rooms as students
+          // Load members per room — only guardians who joined that specific room
           for (final room in rooms) {
-            final members = await ActivityDatabase.instance.getRoomMembers(widget.loggedInEmail);
+            final code = room['code'].toString();
+            final members = await ActivityDatabase.instance.getRoomMembersByCode(code);
+            final roomStudentNames = <String>[];
             for (final member in members) {
-              _addStudentToState(member['name']);
+              final name = _capitalizeName(member['name']);
+              roomStudentNames.add(name);
+              _addStudentToState(name); // still add to global for attendance
             }
+            _roomStudents[code] = roomStudentNames;
           }
         }
         break; // success — exit retry loop
@@ -1161,9 +1109,9 @@ class _TeacherPageState extends State<TeacherPage> {
                   onPressed: () async {
                     String title = _announcementTitleController.text.trim();
                     String message = _announcementMessageController.text.trim();
-                    if (title.isEmpty || message.isEmpty) {
+                    if (title.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Please fill in all fields')),
+                        const SnackBar(content: Text('Please enter a title')),
                       );
                       return;
                     }
@@ -1174,9 +1122,10 @@ class _TeacherPageState extends State<TeacherPage> {
                       'roomCode': selectedRoomCode ?? '',
                     };
                     try {
-                      await ActivityDatabase.instance.insertAnnouncement(newAnnouncement);
+                      final insertedId = await ActivityDatabase.instance.insertAnnouncement(newAnnouncement);
+                      final withId = {...newAnnouncement, 'id': insertedId};
                       setState(() {
-                        _announcements.insert(0, newAnnouncement);
+                        _announcements.insert(0, withId);
                       });
                       if (mounted) {
                         Navigator.pop(context);
@@ -1204,14 +1153,10 @@ class _TeacherPageState extends State<TeacherPage> {
   Widget _buildSection() {
     switch (selectedIndex) {
       case 0:
-        return _activitiesSection();
-      case 1:
         return _roomsSection();
-      case 2:
-        return _announcementsSection();
-      case 3:
+      case 1:
         return _attendanceSection();
-      case 4:
+      case 4: // Profile accessed via avatar tap
         return _genericSection('Teacher Profile', _profileContent());
       default:
         return const SizedBox();
@@ -1273,7 +1218,19 @@ class _TeacherPageState extends State<TeacherPage> {
                     color: Colors.blue,
                   ),
                   title: Text(activity['title'] ?? 'Untitled'),
-                  subtitle: Text('Posted on ${activity['date']}'),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Posted on ${activity['date']}'),
+                      if ((activity['roomCode'] ?? '').toString().isNotEmpty)
+                        Container(
+                          margin: const EdgeInsets.only(top: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                          child: Text('Room: ${activity['roomCode']}', style: const TextStyle(fontSize: 11, color: Colors.blue, fontWeight: FontWeight.w600)),
+                        ),
+                    ],
+                  ),
                   trailing: PopupMenuButton<String>(
                     onSelected: (value) => _handleActivityMenuAction(value, index),
                     itemBuilder: (context) => [
@@ -1329,7 +1286,19 @@ class _TeacherPageState extends State<TeacherPage> {
                 child: ListTile(
                   leading: const Icon(Icons.campaign, color: Colors.blue),
                   title: Text(announcement['title'] ?? 'Untitled', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text(announcement['message'] ?? ''),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(announcement['message'] ?? ''),
+                      if ((announcement['roomCode'] ?? '').toString().isNotEmpty)
+                        Container(
+                          margin: const EdgeInsets.only(top: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                          child: Text('Room: ${announcement['roomCode']}', style: const TextStyle(fontSize: 11, color: Colors.blue, fontWeight: FontWeight.w600)),
+                        ),
+                    ],
+                  ),
                   trailing: PopupMenuButton<String>(
                     onSelected: (value) => _handleAnnouncementMenuAction(value, index),
                     itemBuilder: (context) => [
@@ -1391,180 +1360,342 @@ class _TeacherPageState extends State<TeacherPage> {
       firstDate: DateTime(2020),
       lastDate: DateTime.now(),
     );
-
     if (picked != null) {
       final dateKey = _getDateKey(picked);
-      final savedAttendance = await ActivityDatabase.instance.getAttendanceByDate(dateKey);
-
-      setState(() {
-        _selectedAttendanceDate = picked;
-        _currentAttendance.clear();
-
-        // Map database names back to indices for your UI list
-        for (int i = 0; i < students.length; i++) {
-          if (savedAttendance.containsKey(students[i])) {
-            _currentAttendance[i] = savedAttendance[students[i]]!;
+      final selectedCode = _selectedAttendanceRoom?['code']?.toString();
+      final roomStudents = selectedCode != null ? (_roomStudents[selectedCode] ?? []) : [];
+      final cacheKey = '${selectedCode}_$dateKey';
+      Map<int, String> newAttendance = {};
+      if (_attendanceRecords.containsKey(cacheKey)) {
+        newAttendance = Map.from(_attendanceRecords[cacheKey]!);
+      } else {
+        final saved = await ActivityDatabase.instance.getAttendanceByDate(dateKey);
+        for (int i = 0; i < roomStudents.length; i++) {
+          if (saved.containsKey(roomStudents[i])) {
+            newAttendance[i] = saved[roomStudents[i]]!;
           }
         }
+      }
+      setState(() {
+        _selectedAttendanceDate = picked;
+        _currentAttendance = newAttendance;
       });
     }
   }
 
   void _markAllPresent() {
-    final key = _getDateKey(_selectedAttendanceDate);
-    setState(() => _attendanceRecords[key] = {for (var i = 0; i < students.length; i++) i: 'Present'});
+    final selectedCode = _selectedAttendanceRoom?['code']?.toString();
+    final roomStudents = selectedCode != null ? (_roomStudents[selectedCode] ?? []) : students;
+    setState(() {
+      for (int i = 0; i < roomStudents.length; i++) {
+        _currentAttendance[i] = 'Present';
+      }
+    });
   }
 
   void _saveAttendance() async {
-    // Use the helper from your screenshot
+    final selectedCode = _selectedAttendanceRoom?['code']?.toString();
+    if (selectedCode == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please select a room first.')));
+      return;
+    }
+    final roomStudents = _roomStudents[selectedCode] ?? [];
+    if (roomStudents.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No students in this room.')));
+      return;
+    }
     final dateKey = _getDateKey(_selectedAttendanceDate);
-
-    for (int i = 0; i < students.length; i++) {
-      // Assuming 'students' is a List<String> of names
-      String name = students[i];
-      String status = _currentAttendance[i] ?? 'Absent';
-
-      // This will now work because we added saveAttendance to DatabaseHelper
+    final cacheKey = '${selectedCode}_$dateKey';
+    for (int i = 0; i < roomStudents.length; i++) {
+      final name = roomStudents[i];
+      final status = _currentAttendance[i] ?? 'Pending';
       await ActivityDatabase.instance.saveAttendance(name, dateKey, status);
     }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Attendance saved for $dateKey')),
-    );
+    // Cache with room+date key so switching rooms doesn't lose data
+    setState(() {
+      _attendanceRecords[cacheKey] = Map.from(_currentAttendance);
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Attendance saved for ${_formatDate(_selectedAttendanceDate)}'), backgroundColor: Colors.green),
+      );
+    }
   }
 
   Widget _buildAttendanceSummary(Map<int, String> attendanceMap) {
     final present = _getCountForStatus(attendanceMap, 'Present');
     final absent = _getCountForStatus(attendanceMap, 'Absent');
-    final total = students.length;
+    final late = _getCountForStatus(attendanceMap, 'Late');
     return Card(
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            Column(children: [Text(total.toString(), style: const TextStyle(fontWeight: FontWeight.bold)), const Text('Total')]),
-            Column(children: [Text(present.toString(), style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)), const Text('Present')]),
-            Column(children: [Text(absent.toString(), style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)), const Text('Absent')]),
+            _attendanceStat(present.toString(), 'Present', Colors.green),
+            _attendanceStat(absent.toString(), 'Absent', Colors.red),
+            _attendanceStat(late.toString(), 'Late', Colors.amber[700]!),
           ],
         ),
       ),
     );
   }
 
+  Widget _attendanceStat(String count, String label, Color color) => Column(children: [
+    Text(count, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: color)),
+    Text(label, style: const TextStyle(fontSize: 11)),
+  ]);
+
   Widget _attendanceSection() {
-    if (students.isEmpty) {
-      return _genericSection('Attendance', const Center(child: Text('No students yet. Students appear automatically when a guardian joins your room.')));
+    if (_rooms.isEmpty) {
+      return _genericSection('Attendance', const Center(child: Text('Create a room first to take attendance.')));
     }
-    if (_currentAttendance.isEmpty) _currentAttendance = _getAttendanceForDate(_selectedAttendanceDate);
+
+    final String? selectedCode = _selectedAttendanceRoom?['code']?.toString();
+    final roomStudents = selectedCode != null ? (_roomStudents[selectedCode] ?? []) : [];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 24, 12),
-          child: Row(
-            children: [
-              const SizedBox(width: 48), // offset for burger menu icon
-              const Text('Attendance Records', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            ],
-          ),
+          child: Row(children: [
+            const SizedBox(width: 48),
+            const Text('Attendance', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          ]),
         ),
+        // Room selector — default hint is "Select Room"
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
+          child: DropdownButtonFormField<String>(
+            value: selectedCode,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.meeting_room_outlined),
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+            hint: const Text('Select Room'),
+            items: _rooms.map((room) => DropdownMenuItem<String>(
+              value: room['code'].toString(),
+              child: Text(room['title'] ?? ''),
+            )).toList(),
+            onChanged: (code) async {
+              final newRoom = _rooms.firstWhere((r) => r['code'].toString() == code, orElse: () => _rooms.first);
+              final dateKey = _getDateKey(_selectedAttendanceDate);
+              // First check in-memory cache
+              Map<int, String> newAttendance = {};
+              final cacheKey = '${code}_$dateKey';
+              if (_attendanceRecords.containsKey(cacheKey)) {
+                newAttendance = Map.from(_attendanceRecords[cacheKey]!);
+              } else {
+                // Load from DB
+                final saved = await ActivityDatabase.instance.getAttendanceByDate(dateKey);
+                final roomStudents = _roomStudents[code] ?? [];
+                for (int i = 0; i < roomStudents.length; i++) {
+                  if (saved.containsKey(roomStudents[i])) {
+                    newAttendance[i] = saved[roomStudents[i]]!;
+                  }
+                }
+              }
+              setState(() {
+                _selectedAttendanceRoom = newRoom;
+                _currentAttendance = newAttendance;
+              });
+            },
+          ),
+        ),
+        if (selectedCode == null) ...[
+          const SizedBox(height: 32),
+          const Center(child: Text('Please select a room to take attendance.', style: TextStyle(color: Colors.grey))),
+        ] else if (roomStudents.isEmpty) ...[
+          const SizedBox(height: 32),
+          const Center(child: Text('No students in this room yet.', style: TextStyle(color: Colors.grey))),
+        ] else ...[
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(children: [
               Expanded(
                 child: InkWell(
                   onTap: () => _selectAttendanceDate(context),
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(8)),
-                    child: Text(_formatDate(_selectedAttendanceDate)),
+                    child: Row(children: [
+                      const Icon(Icons.calendar_today, size: 16, color: Colors.blue),
+                      const SizedBox(width: 8),
+                      Text(_formatDate(_selectedAttendanceDate), style: const TextStyle(fontWeight: FontWeight.w500)),
+                    ]),
                   ),
                 ),
               ),
               const SizedBox(width: 12),
-              ElevatedButton(onPressed: _markAllPresent, child: const Text('Mark All Present')),
-            ],
+              ElevatedButton.icon(
+                onPressed: _markAllPresent,
+                icon: const Icon(Icons.check_circle_outline, size: 16),
+                label: const Text('All Present'),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+              ),
+            ]),
           ),
-        ),
-        const SizedBox(height: 16),
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: _buildAttendanceSummary(_currentAttendance)),
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: students.length,
-            itemBuilder: (context, index) {
-              final name = students[index];
-              return ListTile(
-                title: Text(name),
-                trailing: DropdownButton<String>(
-                  value: _currentAttendance[index],
-                  hint: const Text('Status'),
-                  items: [
-                    DropdownMenuItem(
-                      value: 'Present',
-                      child: Text('Present', style: TextStyle(color: Colors.green[700], fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: _buildAttendanceSummary(_currentAttendance)),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: roomStudents.length,
+              itemBuilder: (context, index) {
+                final name = roomStudents[index];
+                // Default to 'Pending' — never show null/hint
+                final status = _currentAttendance[index] ?? 'Pending';
+                Color statusColor = Colors.grey[400]!;
+                if (status == 'Present') statusColor = Colors.green;
+                else if (status == 'Absent') statusColor = Colors.red;
+                else if (status == 'Late') statusColor = Colors.amber[700]!;
+
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: statusColor.withOpacity(0.15),
+                      child: Text(name[0].toUpperCase(), style: TextStyle(color: statusColor, fontWeight: FontWeight.bold)),
                     ),
-                    DropdownMenuItem(
-                      value: 'Absent',
-                      child: Text('Absent', style: TextStyle(color: Colors.red[700], fontWeight: FontWeight.w600)),
+                    title: Text(name, style: const TextStyle(fontWeight: FontWeight.w500)),
+                    trailing: DropdownButton<String>(
+                      value: status,
+                      underline: const SizedBox(),
+                      items: [
+                        DropdownMenuItem(value: 'Pending', child: Text('Pending', style: TextStyle(color: Colors.grey[500], fontWeight: FontWeight.w600))),
+                        DropdownMenuItem(value: 'Present', child: Text('Present', style: TextStyle(color: Colors.green[700], fontWeight: FontWeight.w600))),
+                        DropdownMenuItem(value: 'Late', child: Text('Late', style: TextStyle(color: Colors.amber[700], fontWeight: FontWeight.w600))),
+                        DropdownMenuItem(value: 'Absent', child: Text('Absent', style: TextStyle(color: Colors.red[700], fontWeight: FontWeight.w600))),
+                      ],
+                      onChanged: (val) {
+                        if (val == null) return;
+                        final code = _selectedAttendanceRoom?['code']?.toString();
+                        final dateKey = _getDateKey(_selectedAttendanceDate);
+                        final cacheKey = '${code}_$dateKey';
+                        setState(() {
+                          _currentAttendance[index] = val;
+                          // Write through to cache immediately so navigating away preserves changes
+                          _attendanceRecords[cacheKey] = Map.from(_currentAttendance);
+                        });
+                      },
                     ),
-                    DropdownMenuItem(
-                      value: 'Late',
-                      child: Text('Late', style: TextStyle(color: Colors.amber[800], fontWeight: FontWeight.w600)),
-                    ),
-                  ],
-                  onChanged: (val) { if (val != null) setState(() => _currentAttendance[index] = val); },
-                ),
-              );
-            },
+                  ),
+                );
+              },
+            ),
           ),
-        ),
-        Padding(padding: const EdgeInsets.all(16), child: SizedBox(width: double.infinity, child: ElevatedButton(onPressed: _saveAttendance, child: const Text('Save Attendance')))),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton.icon(
+                onPressed: _saveAttendance,
+                icon: const Icon(Icons.save),
+                label: Text('Save Attendance — ${_formatDate(_selectedAttendanceDate)}'),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
 
   void _handleActivityMenuAction(String action, int index) {
     if (action == 'edit') {
-      _editActivityTitleController.text = _activities[index]['title'] ?? '';
-      _editActivityDescController.text = _activities[index]['description'] ?? '';
       _showEditActivityModal(index);
     } else if (action == 'delete') {
-      setState(() => _activities.removeAt(index));
+      final act = _activities[index];
+      ActivityDatabase.instance.database.then((db) {
+        if (act['id'] != null) {
+          db.delete('activities', where: 'id = ?', whereArgs: [act['id']]);
+        } else {
+          db.delete('activities', where: 'title = ? AND date = ?', whereArgs: [act['title'], act['date']]);
+        }
+      });
+      _removeActivityFromAllStudents(act);
+      setState(() => _activities = List.from(_activities)..removeAt(index));
     }
   }
 
   void _handleAnnouncementMenuAction(String action, int index) {
     if (action == 'edit') {
-      _editAnnouncementTitleController.text = _announcements[index]['title'] ?? '';
-      _editAnnouncementMessageController.text = _announcements[index]['message'] ?? '';
       _showEditAnnouncementModal(index);
     } else if (action == 'delete') {
-      setState(() => _announcements.removeAt(index));
+      final ann = _announcements[index];
+      ActivityDatabase.instance.database.then((db) {
+        if (ann['id'] != null) {
+          db.delete('announcements', where: 'id = ?', whereArgs: [ann['id']]);
+        } else {
+          db.delete('announcements', where: 'title = ? AND date = ?', whereArgs: [ann['title'], ann['date']]);
+        }
+      });
+      setState(() => _announcements = List.from(_announcements)..removeAt(index));
     }
   }
 
   void _showEditActivityModal(int index) {
+    _editActivityTitleController.text = _activities[index]['title'] ?? '';
+    _editActivityDescController.text = _activities[index]['description'] ?? '';
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) => Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 20, right: 20, top: 20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(controller: _editActivityTitleController, decoration: const InputDecoration(labelText: 'Title')),
-            TextField(controller: _editActivityDescController, decoration: const InputDecoration(labelText: 'Description')),
-            ElevatedButton(onPressed: () {
-              setState(() {
-                _activities[index]['title'] = _editActivityTitleController.text;
-                _activities[index]['description'] = _editActivityDescController.text;
-              });
-              Navigator.pop(context);
-            }, child: const Text('Save')),
+            const Text('Edit Activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _editActivityTitleController,
+              decoration: const InputDecoration(labelText: 'Title', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _editActivityDescController,
+              maxLines: 3,
+              decoration: const InputDecoration(labelText: 'Description', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.save),
+                label: const Text('Save Changes'),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                onPressed: () async {
+                  final updatedActivity = {
+                    ..._activities[index],
+                    'title': _editActivityTitleController.text.trim(),
+                    'description': _editActivityDescController.text.trim(),
+                  };
+                  try {
+                    final db = await ActivityDatabase.instance.database;
+                    final fields = {'title': updatedActivity['title'], 'description': updatedActivity['description']};
+                    if (_activities[index]['id'] != null) {
+                      await db.update('activities', fields, where: 'id = ?', whereArgs: [_activities[index]['id']]);
+                    } else {
+                      await db.update('activities', fields, where: 'title = ? AND date = ?', whereArgs: [_activities[index]['title'], _activities[index]['date']]);
+                    }
+                    setState(() => _activities = List.from(_activities)..[index] = updatedActivity);
+                    if (mounted) Navigator.pop(context);
+                  } catch (e) {
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: 20),
           ],
         ),
       ),
@@ -1572,23 +1703,61 @@ class _TeacherPageState extends State<TeacherPage> {
   }
 
   void _showEditAnnouncementModal(int index) {
+    _editAnnouncementTitleController.text = _announcements[index]['title'] ?? '';
+    _editAnnouncementMessageController.text = _announcements[index]['message'] ?? '';
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) => Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 20, right: 20, top: 20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(controller: _editAnnouncementTitleController, decoration: const InputDecoration(labelText: 'Title')),
-            TextField(controller: _editAnnouncementMessageController, decoration: const InputDecoration(labelText: 'Message')),
-            ElevatedButton(onPressed: () {
-              setState(() {
-                _announcements[index]['title'] = _editAnnouncementTitleController.text;
-                _announcements[index]['message'] = _editAnnouncementMessageController.text;
-              });
-              Navigator.pop(context);
-            }, child: const Text('Save')),
+            const Text('Edit Announcement', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _editAnnouncementTitleController,
+              decoration: const InputDecoration(labelText: 'Title', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _editAnnouncementMessageController,
+              maxLines: 4,
+              decoration: const InputDecoration(labelText: 'Message', border: OutlineInputBorder(), alignLabelWithHint: true),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.save),
+                label: const Text('Save Changes'),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                onPressed: () async {
+                  final updatedAnnouncement = {
+                    ..._announcements[index],
+                    'title': _editAnnouncementTitleController.text.trim(),
+                    'message': _editAnnouncementMessageController.text.trim(),
+                  };
+                  try {
+                    final db = await ActivityDatabase.instance.database;
+                    final fields = {'title': updatedAnnouncement['title'], 'message': updatedAnnouncement['message']};
+                    if (_announcements[index]['id'] != null) {
+                      await db.update('announcements', fields, where: 'id = ?', whereArgs: [_announcements[index]['id']]);
+                    } else {
+                      await db.update('announcements', fields, where: 'title = ? AND date = ?', whereArgs: [_announcements[index]['title'], _announcements[index]['date']]);
+                    }
+                    setState(() => _announcements = List.from(_announcements)..[index] = updatedAnnouncement);
+                    if (mounted) Navigator.pop(context);
+                  } catch (e) {
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: 20),
           ],
         ),
       ),
@@ -1858,23 +2027,33 @@ class _TeacherPageState extends State<TeacherPage> {
 class RoomDetailPage extends StatefulWidget {
   final Map<String, dynamic> room;
   final List<String> students;
+  final Map<String, String> studentLrns;
   final List<Map<String, dynamic>> activities;
+  final List<Map<String, dynamic>> announcements;
   final Map<String, Map<String, Map<String, dynamic>>> studentGrades;
   final Map<String, Map<String, TextEditingController>> gradeControllers;
   final double defaultMaxScore;
   final bool isDarkMode;
   final void Function(String, String, String) onSaveGrade;
+  final void Function(String, String, String) onStatusChange;
+  final void Function(Map<String, dynamic>) onActivityAdded;
+  final void Function(Map<String, dynamic>) onAnnouncementAdded;
 
   const RoomDetailPage({
     super.key,
     required this.room,
     required this.students,
+    required this.studentLrns,
     required this.activities,
+    required this.announcements,
     required this.studentGrades,
     required this.gradeControllers,
     required this.defaultMaxScore,
     required this.isDarkMode,
     required this.onSaveGrade,
+    required this.onStatusChange,
+    required this.onActivityAdded,
+    required this.onAnnouncementAdded,
   });
 
   @override
@@ -1882,77 +2061,484 @@ class RoomDetailPage extends StatefulWidget {
 }
 
 class _RoomDetailPageState extends State<RoomDetailPage> {
-  int _tabIndex = 0; // 0 = Students, 1 = Activities
+  int _tabIndex = 0;
+  late List<Map<String, dynamic>> _localActivities;
+  late List<Map<String, dynamic>> _localAnnouncements;
+
+  // Local copy of grades — fully owned by this page, no parent dependency
+  late Map<String, Map<String, Map<String, dynamic>>> _localGrades;
+
+  final _actTitleCtrl = TextEditingController();
+  final _actDescCtrl = TextEditingController();
+  final _annTitleCtrl = TextEditingController();
+  final _annMsgCtrl = TextEditingController();
+
+  DateTime? _actDeadline;
+  List<File> _actImages = [];
+  List<File> _annImages = [];
+
+  @override
+  void initState() {
+    super.initState();
+    final roomCode = (widget.room['code'] ?? '').toString();
+    _localActivities = List.from(widget.activities
+        .where((a) => (a['roomCode'] ?? '').toString() == roomCode)
+        .toList());
+    _localAnnouncements = List.from(widget.announcements
+        .where((a) => (a['roomCode'] ?? '').toString() == roomCode)
+        .toList());
+
+    // Deep-copy grades so we own the data — no shared reference with parent
+    _localGrades = {};
+    widget.studentGrades.forEach((student, actMap) {
+      _localGrades[student] = {};
+      actMap.forEach((actKey, gradeData) {
+        _localGrades[student]![actKey] = Map<String, dynamic>.from(gradeData);
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _actTitleCtrl.dispose();
+    _actDescCtrl.dispose();
+    _annTitleCtrl.dispose();
+    _annMsgCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickImages(bool isActivity) async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: true,
+    );
+    if (result != null) {
+      final files = result.paths.whereType<String>().map((p) => File(p)).toList();
+      setState(() {
+        if (isActivity) _actImages = files;
+        else _annImages = files;
+      });
+    }
+  }
+
+  String _getCurrentDate() {
+    final now = DateTime.now();
+    const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    return '${months[now.month - 1]} ${now.day}, ${now.year}';
+  }
+
+  Widget _tab(String label, int idx) => Expanded(
+    child: InkWell(
+      onTap: () => setState(() => _tabIndex = idx),
+      child: Container(
+        height: 46,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: _tabIndex == idx ? Colors.white : Colors.transparent, width: 3)),
+        ),
+        child: Text(label, style: TextStyle(color: _tabIndex == idx ? Colors.white : Colors.white60, fontWeight: FontWeight.w600, fontSize: 13)),
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
-    final bg = widget.isDarkMode ? Colors.grey[900] : Colors.white;
-    final titleColor = widget.isDarkMode ? Colors.white : Colors.black;
-
     return Scaffold(
-      backgroundColor: bg,
+      backgroundColor: widget.isDarkMode ? Colors.grey[900] : Colors.grey[50],
       appBar: AppBar(
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.room['title'] ?? 'Room', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            Text('Code: ${widget.room['code'] ?? ''}', style: const TextStyle(fontSize: 13, letterSpacing: 3, color: Colors.white70)),
-          ],
-        ),
+        title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(widget.room['title'] ?? 'Room', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          Text('Code: ${widget.room['code'] ?? ''}', style: const TextStyle(fontSize: 12, letterSpacing: 3, color: Colors.white70)),
+        ]),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(48),
-          child: Row(
-            children: [
-              Expanded(
-                child: InkWell(
-                  onTap: () => setState(() => _tabIndex = 0),
-                  child: Container(
-                    height: 48,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      border: Border(bottom: BorderSide(color: _tabIndex == 0 ? Colors.white : Colors.transparent, width: 3)),
-                    ),
-                    child: Text('Students (${widget.students.length})', style: TextStyle(color: _tabIndex == 0 ? Colors.white : Colors.white60, fontWeight: FontWeight.w600)),
-                  ),
-                ),
-              ),
-              Expanded(
-                child: InkWell(
-                  onTap: () => setState(() => _tabIndex = 1),
-                  child: Container(
-                    height: 48,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      border: Border(bottom: BorderSide(color: _tabIndex == 1 ? Colors.white : Colors.transparent, width: 3)),
-                    ),
-                    child: Text('Activities (${widget.activities.length})', style: TextStyle(color: _tabIndex == 1 ? Colors.white : Colors.white60, fontWeight: FontWeight.w600)),
-                  ),
-                ),
-              ),
-            ],
-          ),
+          preferredSize: const Size.fromHeight(46),
+          child: Row(children: [
+            _tab('Activities (${_localActivities.length})', 0),
+            _tab('Announcements', 1),
+            _tab('Students (${widget.students.length})', 2),
+          ]),
         ),
       ),
-      body: _tabIndex == 0 ? _buildStudentsTab(titleColor) : _buildActivitiesTab(titleColor),
+      floatingActionButton: _tabIndex == 0
+          ? FloatingActionButton.extended(
+        onPressed: _showUploadActivity,
+        icon: const Icon(Icons.add),
+        label: const Text('Upload Activity'),
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+      )
+          : _tabIndex == 1
+          ? FloatingActionButton.extended(
+        onPressed: _showPostAnnouncement,
+        icon: const Icon(Icons.add),
+        label: const Text('Post Announcement'),
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+      )
+          : null,
+      body: [
+        _buildActivitiesTab(),
+        _buildAnnouncementsTab(),
+        _buildStudentsTab(),
+      ][_tabIndex],
     );
   }
 
-  Widget _buildStudentsTab(Color titleColor) {
-    if (widget.students.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.people_outline, size: 64, color: Colors.grey[300]),
-            const SizedBox(height: 16),
-            Text('No students yet.', style: TextStyle(fontSize: 16, color: Colors.grey[500])),
+  // ── Upload Activity Modal ────────────────────────────────────────────────
+  void _showUploadActivity() {
+    _actTitleCtrl.clear();
+    _actDescCtrl.clear();
+    _actDeadline = null;
+    _actImages = [];
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setModal) => SingleChildScrollView(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, left: 20, right: 20, top: 20),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Upload New Activity', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          TextField(controller: _actTitleCtrl, decoration: const InputDecoration(labelText: 'Activity Title', border: OutlineInputBorder())),
+          const SizedBox(height: 12),
+          TextField(controller: _actDescCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Description / Instructions', border: OutlineInputBorder())),
+          const SizedBox(height: 12),
+          // Deadline picker
+          InkWell(
+            onTap: () async {
+              final picked = await showDatePicker(
+                context: ctx,
+                initialDate: _actDeadline ?? DateTime.now().add(const Duration(days: 7)),
+                firstDate: DateTime.now(),
+                lastDate: DateTime(2100),
+              );
+              if (picked != null) setModal(() => _actDeadline = picked);
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(4)),
+              child: Row(children: [
+                const Icon(Icons.calendar_today, size: 18, color: Colors.blue),
+                const SizedBox(width: 8),
+                Text(
+                  _actDeadline == null ? 'Set Deadline (optional)' : 'Deadline: ${_actDeadline!.year}-${_actDeadline!.month.toString().padLeft(2,'0')}-${_actDeadline!.day.toString().padLeft(2,'0')}',
+                  style: TextStyle(color: _actDeadline == null ? Colors.grey[600] : Colors.black),
+                ),
+                const Spacer(),
+                if (_actDeadline != null) GestureDetector(
+                  onTap: () => setModal(() => _actDeadline = null),
+                  child: const Icon(Icons.close, size: 16, color: Colors.grey),
+                ),
+              ]),
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Image picker
+          OutlinedButton.icon(
+            onPressed: () async {
+              await _pickImages(true);
+              setModal(() {});
+            },
+            icon: const Icon(Icons.image_outlined),
+            label: Text(_actImages.isEmpty ? 'Attach Images' : '${_actImages.length} image(s) selected'),
+          ),
+          if (_actImages.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text('Students appear when a guardian joins this room.', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: Colors.grey[400])),
+            SizedBox(
+              height: 80,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _actImages.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, i) => Stack(children: [
+                  ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.file(_actImages[i], width: 80, height: 80, fit: BoxFit.cover)),
+                  Positioned(top: 2, right: 2, child: GestureDetector(
+                    onTap: () => setModal(() => _actImages.removeAt(i)),
+                    child: const CircleAvatar(radius: 10, backgroundColor: Colors.black54, child: Icon(Icons.close, size: 12, color: Colors.white)),
+                  )),
+                ]),
+              ),
+            ),
           ],
-        ),
-      );
+          const SizedBox(height: 16),
+          SizedBox(width: double.infinity, height: 48,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+              onPressed: () async {
+                final title = _actTitleCtrl.text.trim();
+                if (title.isEmpty) return;
+                final deadlineStr = _actDeadline != null
+                    ? '${_actDeadline!.year}-${_actDeadline!.month.toString().padLeft(2,'0')}-${_actDeadline!.day.toString().padLeft(2,'0')}'
+                    : '';
+                final imagePathsStr = _actImages.map((f) => f.path).join('|');
+                final activityData = {
+                  'title': title,
+                  'description': _actDescCtrl.text.trim(),
+                  'fileName': _actImages.isNotEmpty ? '${_actImages.length} image(s)' : '',
+                  'filePath': imagePathsStr,
+                  'date': _getCurrentDate(),
+                  'deadline': deadlineStr,
+                  'roomCode': widget.room['code'] ?? '',
+                };
+                try {
+                  final insertedId = await ActivityDatabase.instance.insertActivity(activityData);
+                  final withId = {...activityData, 'id': insertedId};
+                  setState(() => _localActivities = [withId, ..._localActivities]);
+                  widget.onActivityAdded(withId);
+                  if (mounted) Navigator.pop(ctx);
+                } catch (e) {
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
+              },
+              child: const Text('Post Activity'),
+            ),
+          ),
+          const SizedBox(height: 20),
+        ]),
+      )),
+    );
+  }
+
+  // ── Post Announcement Modal ──────────────────────────────────────────────
+  void _showPostAnnouncement() {
+    _annTitleCtrl.clear();
+    _annMsgCtrl.clear();
+    _annImages = [];
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setModal) => SingleChildScrollView(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, left: 20, right: 20, top: 20),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Post Announcement', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          TextField(controller: _annTitleCtrl, decoration: const InputDecoration(labelText: 'Title', border: OutlineInputBorder())),
+          const SizedBox(height: 12),
+          TextField(controller: _annMsgCtrl, maxLines: 4, decoration: const InputDecoration(labelText: 'Message', border: OutlineInputBorder(), alignLabelWithHint: true)),
+          const SizedBox(height: 12),
+          // Image picker
+          OutlinedButton.icon(
+            onPressed: () async {
+              await _pickImages(false);
+              setModal(() {});
+            },
+            icon: const Icon(Icons.image_outlined),
+            label: Text(_annImages.isEmpty ? 'Attach Images' : '${_annImages.length} image(s) selected'),
+          ),
+          if (_annImages.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 80,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _annImages.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, i) => Stack(children: [
+                  ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.file(_annImages[i], width: 80, height: 80, fit: BoxFit.cover)),
+                  Positioned(top: 2, right: 2, child: GestureDetector(
+                    onTap: () => setModal(() => _annImages.removeAt(i)),
+                    child: const CircleAvatar(radius: 10, backgroundColor: Colors.black54, child: Icon(Icons.close, size: 12, color: Colors.white)),
+                  )),
+                ]),
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          SizedBox(width: double.infinity, height: 48,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+              onPressed: () async {
+                final title = _annTitleCtrl.text.trim();
+                final msg = _annMsgCtrl.text.trim();
+                if (title.isEmpty) return;
+                final imagePathsStr = _annImages.map((f) => f.path).join('|');
+                final ann = {
+                  'title': title,
+                  'message': msg,
+                  'date': _getCurrentDate(),
+                  'imagePaths': imagePathsStr,
+                  'roomCode': widget.room['code'] ?? '',
+                };
+                try {
+                  final insertedId = await ActivityDatabase.instance.insertAnnouncement(ann);
+                  final withId = {...ann, 'id': insertedId};
+                  setState(() => _localAnnouncements = [withId, ..._localAnnouncements]);
+                  widget.onAnnouncementAdded(withId);
+                  if (mounted) Navigator.pop(ctx);
+                } catch (e) {
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
+              },
+              child: const Text('Post Announcement'),
+            ),
+          ),
+          const SizedBox(height: 20),
+        ]),
+      )),
+    );
+  }
+
+  // ── Activities Tab ───────────────────────────────────────────────────────
+  Widget _buildActivitiesTab() {
+    if (_localActivities.isEmpty) {
+      return const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(Icons.folder_open, size: 64, color: Colors.grey),
+        SizedBox(height: 16),
+        Text('No activities yet. Tap "+ Upload Activity" to post one.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+      ]));
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _localActivities.length,
+      itemBuilder: (context, i) {
+        final act = _localActivities[i];
+        final deadline = (act['deadline'] ?? '').toString();
+        final imagePaths = (act['filePath'] ?? '').toString()
+            .split('|').where((s) => s.isNotEmpty).toList();
+        final hasDeadline = deadline.isNotEmpty;
+        final isOverdue = hasDeadline && DateTime.tryParse(deadline)?.isBefore(DateTime.now()) == true;
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const CircleAvatar(backgroundColor: Colors.blue, radius: 18, child: Icon(Icons.assignment, color: Colors.white, size: 18)),
+                const SizedBox(width: 12),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(act['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                  Text('Posted: ${act['date'] ?? ''}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                ])),
+                if (hasDeadline)
+                  Container(
+                    margin: const EdgeInsets.only(right: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isOverdue ? Colors.red.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: isOverdue ? Colors.red : Colors.orange),
+                    ),
+                    child: Text(isOverdue ? 'Overdue' : 'Due: $deadline',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: isOverdue ? Colors.red : Colors.orange)),
+                  ),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, size: 20),
+                  onSelected: (value) => value == 'edit' ? _editActivity(i) : _deleteActivity(i),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, size: 16), SizedBox(width: 8), Text('Edit')])),
+                    PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline, size: 16, color: Colors.red), SizedBox(width: 8), Text('Delete', style: TextStyle(color: Colors.red))])),
+                  ],
+                ),
+              ]),
+              if ((act['description'] ?? '').toString().isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(act['description'] ?? '', style: const TextStyle(fontSize: 13)),
+              ],
+              if (imagePaths.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 90,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: imagePaths.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (_, idx) => ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: File(imagePaths[idx]).existsSync()
+                          ? Image.file(File(imagePaths[idx]), width: 90, height: 90, fit: BoxFit.cover)
+                          : Container(width: 90, height: 90, color: Colors.grey[200], child: const Icon(Icons.broken_image, color: Colors.grey)),
+                    ),
+                  ),
+                ),
+              ],
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Announcements Tab ────────────────────────────────────────────────────
+  Widget _buildAnnouncementsTab() {
+    if (_localAnnouncements.isEmpty) {
+      return const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(Icons.campaign_outlined, size: 64, color: Colors.grey),
+        SizedBox(height: 16),
+        Text('No announcements yet. Tap "+ Post Announcement" to add one.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+      ]));
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _localAnnouncements.length,
+      itemBuilder: (context, i) {
+        final ann = _localAnnouncements[i];
+        final imagePaths = (ann['imagePaths'] ?? '').toString()
+            .split('|').where((s) => s.isNotEmpty).toList();
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const CircleAvatar(backgroundColor: Colors.orange, radius: 18, child: Icon(Icons.campaign, color: Colors.white, size: 18)),
+                const SizedBox(width: 12),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(ann['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                  Text(ann['date'] ?? '', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                ])),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, size: 20),
+                  onSelected: (value) => value == 'edit' ? _editAnnouncement(i) : _deleteAnnouncement(i),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, size: 16), SizedBox(width: 8), Text('Edit')])),
+                    PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline, size: 16, color: Colors.red), SizedBox(width: 8), Text('Delete', style: TextStyle(color: Colors.red))])),
+                  ],
+                ),
+              ]),
+              if ((ann['message'] ?? '').toString().isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(ann['message'] ?? '', style: const TextStyle(fontSize: 13)),
+              ],
+              if (imagePaths.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 90,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: imagePaths.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (_, idx) => ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: File(imagePaths[idx]).existsSync()
+                          ? Image.file(File(imagePaths[idx]), width: 90, height: 90, fit: BoxFit.cover)
+                          : Container(width: 90, height: 90, color: Colors.grey[200], child: const Icon(Icons.broken_image, color: Colors.grey)),
+                    ),
+                  ),
+                ),
+              ],
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Students Tab ─────────────────────────────────────────────────────────
+  Widget _buildStudentsTab() {
+    if (widget.students.isEmpty) {
+      return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(Icons.people_outline, size: 64, color: Colors.grey[300]),
+        const SizedBox(height: 16),
+        Text('No students yet.', style: TextStyle(color: Colors.grey[500])),
+        const SizedBox(height: 8),
+        Text('Students appear when a guardian joins this room.', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: Colors.grey[400])),
+      ]));
     }
     return ListView.separated(
       padding: const EdgeInsets.all(16),
@@ -1960,90 +2546,362 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
       separatorBuilder: (_, __) => const SizedBox(height: 8),
       itemBuilder: (context, i) {
         final student = widget.students[i];
-        double total = 0;
-        int graded = 0;
-        widget.studentGrades[student]?.forEach((_, data) {
-          if (data['grade'] != null) { total += data['grade']; graded++; }
-        });
-        final summary = graded > 0 ? '${(total / (graded * 100) * 100).toStringAsFixed(0)}%' : '0%';
+        final lrn = widget.studentLrns[student] ?? '';
+        return StatefulBuilder(builder: (context, setStudent) {
+          // Grade summary: sum of all scored activities / (count * 100) * 100 = average %
+          double total = 0; int graded = 0;
+          final int totalActivities = _localActivities.length;
+          for (final act in _localActivities) {
+            final key = '${act['title']}_${act['date']}';
+            final data = _localGrades[student]?[key] ?? {};
+            final s = (data['status'] ?? 'Pending') as String;
+            if ((s == 'Completed' || s == 'Late') && data['grade'] != null) {
+              total += (data['grade'] as double);
+              graded++;
+            }
+          }
+          // Average = sum of scores / number graded (each score is already 0-100)
+          final avg = graded > 0 ? (total / graded) : 0.0;
+          final summaryDisplay = graded > 0
+              ? '${avg.toStringAsFixed(1)} / 100'
+              : '— / 100';
 
-        return Card(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          child: ExpansionTile(
-            leading: CircleAvatar(backgroundColor: Colors.blue.shade100, child: Text(student[0].toUpperCase())),
-            title: Text(student, style: const TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text('Grade summary: $summary'),
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    ...widget.activities.map((activity) {
+          return Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: ExpansionTile(
+              leading: CircleAvatar(backgroundColor: Colors.blue.shade100, child: Text(student[0].toUpperCase())),
+              title: Text(student, style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: lrn.isNotEmpty ? Text('LRN: $lrn', style: const TextStyle(fontSize: 12, color: Colors.grey)) : null,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(children: [
+                    ..._localActivities.map((activity) {
                       final key = '${activity['title']}_${activity['date']}';
-                      final gradeData = widget.studentGrades[student]?[key] ?? {};
-                      final controller = widget.gradeControllers[student]?[key] ?? TextEditingController();
-                      final score = (gradeData['grade'] ?? 0.0) as double;
-                      final pct = '${((score / widget.defaultMaxScore) * 100).toStringAsFixed(0)}%';
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 10),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(activity['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 8),
-                          Row(children: [
-                            Expanded(child: TextField(
-                              controller: controller,
-                              keyboardType: TextInputType.number,
-                              decoration: InputDecoration(labelText: 'Score', suffixText: '/ 100', border: const OutlineInputBorder(), helperText: 'Pct: $pct'),
-                            )),
-                            const SizedBox(width: 8),
-                            IconButton(icon: const Icon(Icons.save, color: Colors.blue), onPressed: () => widget.onSaveGrade(student, key, controller.text)),
+                      return StatefulBuilder(builder: (ctx, setCard) {
+                        final gradeData = _localGrades[student]?[key] ?? {};
+                        final controller = widget.gradeControllers[student]?[key] ?? TextEditingController();
+                        final rawGrade = gradeData['grade'];
+                        final score = rawGrade != null ? (rawGrade as double) : 0.0;
+                        final hasGrade = rawGrade != null;
+                        // Sync controller text from local grades so score is always visible
+                        if (hasGrade && controller.text.isEmpty) {
+                          controller.text = score.toStringAsFixed(0);
+                        }
+                        final pct = hasGrade ? '${score.toStringAsFixed(0)}%' : '—';
+                        final status = (gradeData['status'] ?? 'Pending') as String;
+                        final canGrade = status == 'Completed' || status == 'Late';
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: canGrade ? Colors.blue.shade200 : Colors.grey.shade400),
+                            borderRadius: BorderRadius.circular(8),
+                            color: canGrade ? null : (widget.isDarkMode ? Colors.grey[850] : Colors.grey[100]),
+                          ),
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                              Expanded(child: Text(activity['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600))),
+                              DropdownButton<String>(
+                                value: status,
+                                underline: const SizedBox(),
+                                items: ['Pending', 'Completed', 'Late', 'Missed'].map((v) => DropdownMenuItem(
+                                  value: v,
+                                  child: Text(v, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                                      color: v == 'Missed' ? Colors.red
+                                          : v == 'Late' ? Colors.orange.shade700
+                                          : v == 'Completed' ? Colors.green
+                                          : Colors.grey[500])),
+                                )).toList(),
+                                onChanged: (newStatus) {
+                                  if (newStatus == null) return;
+                                  // Update local grades immediately
+                                  setState(() {
+                                    _localGrades[student] ??= {};
+                                    _localGrades[student]![key] ??= {};
+                                    _localGrades[student]![key]!['status'] = newStatus;
+                                    if (newStatus == 'Missed') {
+                                      _localGrades[student]![key]!['grade'] = 0.0;
+                                      controller.text = '0';
+                                    } else if (newStatus == 'Pending') {
+                                      controller.clear();
+                                    } else if (status == 'Missed') {
+                                      controller.clear();
+                                    }
+                                  });
+                                  // Also notify parent
+                                  widget.onStatusChange(student, key, newStatus);
+                                  if (newStatus == 'Missed') widget.onSaveGrade(student, key, '0');
+                                  setCard(() {});
+                                  setStudent(() {});
+                                },
+                              ),
+                            ]),
+                            const SizedBox(height: 6),
+                            if (status == 'Missed')
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                child: Text('Score: 0 / 100', style: TextStyle(fontSize: 14, color: Colors.red[700], fontWeight: FontWeight.w600)),
+                              )
+                            else
+                              Row(children: [
+                                Expanded(child: TextField(
+                                  controller: controller,
+                                  keyboardType: TextInputType.number,
+                                  enabled: status != 'Pending',
+                                  decoration: InputDecoration(
+                                    labelText: 'Score',
+                                    suffixText: '/ 100',
+                                    border: const OutlineInputBorder(),
+                                    helperText: status == 'Pending'
+                                        ? '⚠ Set to Completed or Late to grade'
+                                        : hasGrade ? 'Percentage: $pct' : 'Enter score (0–100)',
+                                    helperStyle: TextStyle(
+                                      color: status == 'Pending' ? Colors.grey[500] : Colors.grey[600],
+                                      fontStyle: status == 'Pending' ? FontStyle.italic : FontStyle.normal,
+                                    ),
+                                  ),
+                                )),
+                                const SizedBox(width: 8),
+                                IconButton(
+                                  icon: Icon(Icons.save, color: status == 'Pending' ? Colors.grey[400] : Colors.blue),
+                                  onPressed: status == 'Pending' ? null : () {
+                                    final parsed = double.tryParse(controller.text);
+                                    // Update local grades immediately
+                                    setState(() {
+                                      _localGrades[student] ??= {};
+                                      _localGrades[student]![key] ??= {};
+                                      _localGrades[student]![key]!['grade'] = parsed;
+                                    });
+                                    widget.onSaveGrade(student, key, controller.text);
+                                    setCard(() {});
+                                    setStudent(() {});
+                                  },
+                                ),
+                              ]),
                           ]),
-                        ]),
-                      );
+                        );
+                      });
                     }).toList(),
-                  ],
+                    const Divider(height: 24),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                        const Text('Grade Summary', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.blue)),
+                        Text(summaryDisplay, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blue)),
+                      ]),
+                    ),
+                  ]),
                 ),
-              ),
-            ],
-          ),
-        );
+              ],
+            ),
+          );
+        }); // end student StatefulBuilder
       },
     );
   }
 
-  Widget _buildActivitiesTab(Color titleColor) {
-    if (widget.activities.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.folder_open, size: 64, color: Colors.grey[300]),
-            const SizedBox(height: 16),
-            Text('No activities posted yet.', style: TextStyle(fontSize: 16, color: Colors.grey[500])),
-          ],
-        ),
-      );
-    }
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: widget.activities.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
-      itemBuilder: (context, i) {
-        final act = widget.activities[i];
-        return Card(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          child: ListTile(
-            leading: const CircleAvatar(backgroundColor: Colors.blue, child: Icon(Icons.assignment, color: Colors.white)),
-            title: Text(act['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text(act['date'] ?? ''),
-            trailing: act['fileName'] != null && (act['fileName'] as String).isNotEmpty
-                ? const Icon(Icons.attach_file, color: Colors.grey)
-                : null,
+  // ── Edit / Delete Activity ────────────────────────────────────────────────
+  void _editActivity(int i) {
+    final act = _localActivities[i];
+    final titleCtrl = TextEditingController(text: act['title'] ?? '');
+    final descCtrl = TextEditingController(text: act['description'] ?? '');
+    DateTime? deadline = act['deadline'] != null && (act['deadline'] as String).isNotEmpty
+        ? DateTime.tryParse(act['deadline']) : null;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setModal) => SingleChildScrollView(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, left: 20, right: 20, top: 20),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Edit Activity', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Activity Title', border: OutlineInputBorder())),
+          const SizedBox(height: 12),
+          TextField(controller: descCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Description', border: OutlineInputBorder())),
+          const SizedBox(height: 12),
+          InkWell(
+            onTap: () async {
+              final picked = await showDatePicker(
+                context: ctx,
+                initialDate: deadline ?? DateTime.now().add(const Duration(days: 7)),
+                firstDate: DateTime.now(),
+                lastDate: DateTime(2100),
+              );
+              if (picked != null) setModal(() => deadline = picked);
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(4)),
+              child: Row(children: [
+                const Icon(Icons.calendar_today, size: 18, color: Colors.blue),
+                const SizedBox(width: 8),
+                Text(deadline == null ? 'Set Deadline (optional)'
+                    : 'Deadline: ${deadline!.year}-${deadline!.month.toString().padLeft(2,'0')}-${deadline!.day.toString().padLeft(2,'0')}',
+                    style: TextStyle(color: deadline == null ? Colors.grey[600] : null)),
+                const Spacer(),
+                if (deadline != null) GestureDetector(
+                  onTap: () => setModal(() => deadline = null),
+                  child: const Icon(Icons.close, size: 16, color: Colors.grey),
+                ),
+              ]),
+            ),
           ),
-        );
-      },
+          const SizedBox(height: 16),
+          SizedBox(width: double.infinity, height: 48,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.save),
+              label: const Text('Save Changes'),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+              onPressed: () async {
+                final title = titleCtrl.text.trim();
+                if (title.isEmpty) return;
+                final deadlineStr = deadline != null
+                    ? '${deadline!.year}-${deadline!.month.toString().padLeft(2,'0')}-${deadline!.day.toString().padLeft(2,'0')}' : '';
+                final updated = {...act, 'title': title, 'description': descCtrl.text.trim(), 'deadline': deadlineStr};
+                try {
+                  final db = await ActivityDatabase.instance.database;
+                  final fields = {'title': title, 'description': descCtrl.text.trim(), 'deadline': deadlineStr};
+                  if (act['id'] != null) {
+                    await db.update('activities', fields, where: 'id = ?', whereArgs: [act['id']]);
+                  } else {
+                    await db.update('activities', fields, where: 'title = ? AND date = ?', whereArgs: [act['title'], act['date']]);
+                  }
+                  setState(() {
+                    _localActivities = List.from(_localActivities)..[i] = updated;
+                  });
+                  if (mounted) Navigator.pop(context);
+                } catch (e) {
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
+              },
+            ),
+          ),
+          const SizedBox(height: 20),
+        ]),
+      )),
+    );
+  }
+
+  void _deleteActivity(int i) {
+    final act = _localActivities[i];
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Activity'),
+        content: Text('Delete "${act['title']}"? This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                final db = await ActivityDatabase.instance.database;
+                if (act['id'] != null) {
+                  await db.delete('activities', where: 'id = ?', whereArgs: [act['id']]);
+                } else {
+                  await db.delete('activities', where: 'title = ? AND date = ?', whereArgs: [act['title'], act['date']]);
+                }
+                setState(() {
+                  _localActivities = List.from(_localActivities)..removeAt(i);
+                });
+              } catch (_) {}
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Edit / Delete Announcement ───────────────────────────────────────────
+  void _editAnnouncement(int i) {
+    final ann = _localAnnouncements[i];
+    final titleCtrl = TextEditingController(text: ann['title'] ?? '');
+    final msgCtrl = TextEditingController(text: ann['message'] ?? '');
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SingleChildScrollView(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, left: 20, right: 20, top: 20),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Edit Announcement', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Title', border: OutlineInputBorder())),
+          const SizedBox(height: 12),
+          TextField(controller: msgCtrl, maxLines: 4, decoration: const InputDecoration(labelText: 'Message', border: OutlineInputBorder(), alignLabelWithHint: true)),
+          const SizedBox(height: 16),
+          SizedBox(width: double.infinity, height: 48,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.save),
+              label: const Text('Save Changes'),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+              onPressed: () async {
+                final title = titleCtrl.text.trim();
+                if (title.isEmpty) return;
+                final updated = {...ann, 'title': title, 'message': msgCtrl.text.trim()};
+                try {
+                  final db = await ActivityDatabase.instance.database;
+                  final fields = {'title': title, 'message': msgCtrl.text.trim()};
+                  if (ann['id'] != null) {
+                    await db.update('announcements', fields, where: 'id = ?', whereArgs: [ann['id']]);
+                  } else {
+                    await db.update('announcements', fields, where: 'title = ? AND date = ?', whereArgs: [ann['title'], ann['date']]);
+                  }
+                  setState(() {
+                    _localAnnouncements = List.from(_localAnnouncements)..[i] = updated;
+                  });
+                  if (mounted) Navigator.pop(context);
+                } catch (e) {
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
+              },
+            ),
+          ),
+          const SizedBox(height: 20),
+        ]),
+      ),
+    );
+  }
+
+  void _deleteAnnouncement(int i) {
+    final ann = _localAnnouncements[i];
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Announcement'),
+        content: Text('Delete "${ann['title']}"? This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                final db = await ActivityDatabase.instance.database;
+                if (ann['id'] != null) {
+                  await db.delete('announcements', where: 'id = ?', whereArgs: [ann['id']]);
+                } else {
+                  await db.delete('announcements', where: 'title = ? AND date = ?', whereArgs: [ann['title'], ann['date']]);
+                }
+                setState(() {
+                  _localAnnouncements = List.from(_localAnnouncements)..removeAt(i);
+                });
+              } catch (_) {}
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
     );
   }
 }

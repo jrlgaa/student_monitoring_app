@@ -161,11 +161,11 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                     Center(
                       child: Column(
                         children: [
-                          Image.network(
-                            'https://github.com/jrlgaa/LMS/blob/Source-Code/cropped_circle_image%20(1).png?raw=true',
-                            width: 80,
-                            height: 80,
-                            errorBuilder: (_, __, ___) => Icon(Icons.school_rounded, color: _textSecondary, size: 48),
+                          Image.asset(
+                            'lib/assets/Logo_app.png',
+                            width: 110,
+                            height: 110,
+                            errorBuilder: (_, __, ___) => Icon(Icons.school_rounded, color: _textSecondary, size: 60),
                           ),
                           const SizedBox(height: 20),
                           Text(

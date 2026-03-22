@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:project/database/admin_db.dart';
+import 'package:project/database/teacher_db.dart';
 
 class AdminPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -29,12 +30,16 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
   List<Map<String, dynamic>> _allArchivedItems = [];
   List<Map<String, dynamic>> _teachers = [];
   List<Map<String, dynamic>> _guardians = [];
+  List<Map<String, dynamic>> _rooms = [];
+  List<Map<String, dynamic>> _archivedRooms = [];
 
   final List<String> menuTitles = [
     'Dashboard',
     'Students',
     'Teachers',
     'Guardians',
+    'Rooms',
+    'Archived Rooms',
     'Archives',
   ];
 
@@ -43,6 +48,8 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
     Icons.school_rounded,
     Icons.person_4_rounded,
     Icons.family_restroom_rounded,
+    Icons.meeting_room_rounded,
+    Icons.door_back_door_rounded,
     Icons.archive_rounded,
   ];
 
@@ -110,6 +117,8 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
     final guardianData =
     await DatabaseHelper.instance.readUsersByRole('Guardian');
     final archivedUsers = await DatabaseHelper.instance.readArchivedUsers();
+    final roomsData = await ActivityDatabase.instance.getAllRooms();
+    final archivedRoomsData = await ActivityDatabase.instance.getArchivedRooms();
 
     if (mounted) {
       setState(() {
@@ -117,6 +126,8 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
         _teachers = teacherData;
         _guardians = guardianData;
         _allArchivedItems = [...archivedStudents, ...archivedUsers];
+        _rooms = roomsData;
+        _archivedRooms = archivedRoomsData;
       });
       _triggerSectionAnimation();
     }
@@ -231,7 +242,9 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
     if (selectedIndex == 1) list = _students;
     if (selectedIndex == 2) list = _teachers;
     if (selectedIndex == 3) list = _guardians;
-    if (selectedIndex == 4) list = _allArchivedItems;
+    if (selectedIndex == 4) list = _rooms;
+    if (selectedIndex == 5) list = _archivedRooms;
+    if (selectedIndex == 6) list = _allArchivedItems;
 
     if (_searchQuery.isEmpty) return list;
     return list.where((item) {
@@ -569,6 +582,10 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
     switch (selectedIndex) {
       case 0:
         return _dashboardOverview();
+      case 4:
+        return _roomsSection(archived: false);
+      case 5:
+        return _roomsSection(archived: true);
       default:
         return _userListSection(menuTitles[selectedIndex]);
     }
@@ -599,8 +616,8 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
                     Icons.person_4_rounded, _successGreen),
                 _animatedCard(2, 'Guardians', _guardians.length.toString(),
                     Icons.family_restroom_rounded, _purple),
-                _animatedCard(3, 'Archived', _allArchivedItems.length.toString(),
-                    Icons.archive_rounded, _warningAmber),
+                _animatedCard(3, 'Rooms', _rooms.length.toString(),
+                    Icons.meeting_room_rounded, const Color(0xFF0891B2)),
               ],
             ),
           ),
@@ -618,7 +635,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
   Widget _buildDashboardHeader() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(24, 56, 24, 28),
+      padding: const EdgeInsets.fromLTRB(24, 80, 24, 28),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: widget.isDarkMode
@@ -887,10 +904,477 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
 
   // ─────────────────────── LIST SECTION ───────────────────────
 
+  // ─────────────────────── ROOMS SECTION ───────────────────────
+
+  Widget _roomsSection({bool archived = false}) {
+    final sourceList = archived ? _archivedRooms : _rooms;
+    final filtered = _searchQuery.isEmpty
+        ? sourceList
+        : sourceList.where((r) {
+      final title = (r['title'] ?? '').toString().toLowerCase();
+      final code = (r['code'] ?? '').toString().toLowerCase();
+      final teacher = (r['teacherEmail'] ?? '').toString().toLowerCase();
+      return title.contains(_searchQuery.toLowerCase()) ||
+          code.contains(_searchQuery.toLowerCase()) ||
+          teacher.contains(_searchQuery.toLowerCase());
+    }).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 58, 24, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                archived ? 'Archived Rooms' : 'Rooms',
+                style: TextStyle(
+                  color: _textPrimary,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              Text(
+                '${filtered.length} room${filtered.length != 1 ? 's' : ''}${archived ? ' archived' : ' created by teachers'}',
+                style: TextStyle(color: _textSecondary, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: _searchBar(archived ? 'Archived Rooms' : 'Rooms'),
+        ),
+        const SizedBox(height: 16),
+        Expanded(
+          child: filtered.isEmpty
+              ? _emptyState(archived ? 'Archived Rooms' : 'Rooms', false)
+              : ListView.builder(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+            itemCount: filtered.length,
+            itemBuilder: (context, index) {
+              final room = filtered[index];
+              return _animatedRoomCard(index, room, archived: archived);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _animatedRoomCard(int index, Map<String, dynamic> room, {bool archived = false}) {
+    final animation = CurvedAnimation(
+      parent: _listController,
+      curve: Interval(
+        (0.05 * index).clamp(0, 1.0),
+        (0.05 * index + 0.5).clamp(0, 1.0),
+        curve: Curves.easeOut,
+      ),
+    );
+    return AnimatedBuilder(
+      animation: _listController,
+      builder: (context, child) => Opacity(
+        opacity: animation.value,
+        child: Transform.translate(
+            offset: Offset(0, 16 * (1 - animation.value)), child: child),
+      ),
+      child: _roomCard(room, archived: archived),
+    );
+  }
+
+  Widget _roomCard(Map<String, dynamic> room, {bool archived = false}) {
+    const Color roomColor = Color(0xFF0891B2);
+    final String title = room['title'] ?? 'Untitled Room';
+    final String code = room['code'] ?? '---';
+    final String teacherEmail = room['teacherEmail'] ?? '';
+    final String createdAt = room['createdAt'] ?? '';
+
+    // Format date nicely if available
+    String dateLabel = '';
+    if (createdAt.isNotEmpty) {
+      try {
+        final dt = DateTime.parse(createdAt);
+        dateLabel = '${dt.year}-${dt.month.toString().padLeft(2,'0')}-${dt.day.toString().padLeft(2,'0')}';
+      } catch (_) {
+        dateLabel = createdAt.length > 10 ? createdAt.substring(0, 10) : createdAt;
+      }
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: GestureDetector(
+        onTap: () => _showRoomDetailDialog(room),
+        child: Container(
+          decoration: BoxDecoration(
+            color: _cardColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _dividerColor, width: 1),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                // Room icon
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: roomColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(Icons.meeting_room_rounded,
+                      color: roomColor, size: 22),
+                ),
+                const SizedBox(width: 13),
+                // Info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: _textPrimary,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: roomColor.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              code,
+                              style: const TextStyle(
+                                color: roomColor,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              teacherEmail,
+                              style: TextStyle(
+                                  color: _textSecondary, fontSize: 12),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                // Date + actions
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (!archived)
+                          _iconAction(
+                            icon: Icons.archive_rounded,
+                            color: _warningAmber,
+                            bgColor: _warningAmber.withOpacity(0.08),
+                            onTap: () async {
+                              await ActivityDatabase.instance.archiveRoomByCode(code);
+                              _refreshData();
+                              _showSnackbar('Room archived');
+                            },
+                          ),
+                        if (archived) ...[
+                          _iconAction(
+                            icon: Icons.unarchive_rounded,
+                            color: _successGreen,
+                            bgColor: _successGreen.withOpacity(0.08),
+                            onTap: () async {
+                              await ActivityDatabase.instance.restoreRoomByCode(code);
+                              _refreshData();
+                              _showSnackbar('Room restored');
+                            },
+                          ),
+                          const SizedBox(width: 6),
+                          _iconAction(
+                            icon: Icons.delete_forever_rounded,
+                            color: _dangerRed,
+                            bgColor: _dangerRed.withOpacity(0.08),
+                            onTap: () => _showDeleteRoomConfirmation(room),
+                          ),
+                        ],
+                      ],
+                    ),
+                    if (dateLabel.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          dateLabel,
+                          style: TextStyle(color: _textSecondary, fontSize: 10),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showDeleteRoomConfirmation(Map<String, dynamic> room) {
+    final String title = room['title'] ?? 'this room';
+    final String code = room['code'] ?? '';
+    showDialog(
+      context: context,
+      builder: (context) => _styledDialog(
+        title: 'Delete Room',
+        icon: Icons.delete_forever_rounded,
+        iconColor: _dangerRed,
+        content: 'Permanently delete "$title" (Code: $code)? This cannot be undone.',
+        actions: [
+          _dialogButton(
+            label: 'Cancel',
+            onTap: () => Navigator.pop(context),
+            outlined: true,
+          ),
+          _dialogButton(
+            label: 'Delete',
+            onTap: () async {
+              await ActivityDatabase.instance.deleteRoomByCode(code);
+              Navigator.pop(context);
+              _refreshData();
+              _showSnackbar('Room permanently deleted', isError: true);
+            },
+            color: _dangerRed,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRoomDetailDialog(Map<String, dynamic> room) async {
+    const Color roomColor = Color(0xFF0891B2);
+    final String code = room['code'] ?? '';
+    final String title = room['title'] ?? 'Untitled Room';
+    final String teacherEmail = room['teacherEmail'] ?? '';
+
+    // Load members for this room
+    List<Map<String, dynamic>> members = [];
+    try {
+      members = await ActivityDatabase.instance.getRoomMembersByCode(code);
+    } catch (_) {}
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: _cardColor,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: roomColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.meeting_room_rounded,
+                        color: roomColor, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title,
+                            style: TextStyle(
+                                color: _textPrimary,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16)),
+                        Text(teacherEmail,
+                            style: TextStyle(
+                                color: _textSecondary, fontSize: 12),
+                            overflow: TextOverflow.ellipsis),
+                      ],
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                          color: _dividerColor, shape: BoxShape.circle),
+                      child: Icon(Icons.close_rounded,
+                          color: _textSecondary, size: 15),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              // Room code badge
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: roomColor.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: roomColor.withOpacity(0.2), width: 1),
+                ),
+                child: Column(
+                  children: [
+                    Text('Room Code',
+                        style: TextStyle(
+                            color: _textSecondary, fontSize: 11)),
+                    const SizedBox(height: 4),
+                    Text(
+                      code,
+                      style: const TextStyle(
+                        color: roomColor,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Members header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Members',
+                      style: TextStyle(
+                          color: _textPrimary,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14)),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: _dividerColor,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text('${members.length}',
+                        style: TextStyle(
+                            color: _textSecondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              // Members list
+              members.isEmpty
+                  ? Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Center(
+                  child: Text('No guardians have joined yet',
+                      style: TextStyle(
+                          color: _textSecondary, fontSize: 13)),
+                ),
+              )
+                  : ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 200),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: members.length,
+                  separatorBuilder: (_, __) =>
+                      Divider(color: _dividerColor, height: 1),
+                  itemBuilder: (context, i) {
+                    final m = members[i];
+                    final name = m['name'] ?? m['email'] ?? '';
+                    final email = m['email'] ?? '';
+                    final initial = name.isNotEmpty
+                        ? name[0].toUpperCase()
+                        : '?';
+                    return Padding(
+                      padding:
+                      const EdgeInsets.symmetric(vertical: 8),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: _successGreen.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Center(
+                              child: Text(initial,
+                                  style: TextStyle(
+                                      color: _successGreen,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14)),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                              children: [
+                                Text(name,
+                                    style: TextStyle(
+                                        color: _textPrimary,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500)),
+                                Text(email,
+                                    style: TextStyle(
+                                        color: _textSecondary,
+                                        fontSize: 11),
+                                    overflow: TextOverflow.ellipsis),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: _dialogButton(
+                  label: 'Close',
+                  onTap: () => Navigator.pop(context),
+                  outlined: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _userListSection(String title) {
     final currentList = _getCurrentList();
     final isStudentTab = title == 'Students';
-    final isArchiveTab = selectedIndex == 4;
+    final isArchiveTab = selectedIndex == 6;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1143,7 +1627,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (selectedIndex != 4)
+                    if (selectedIndex != 6)
                       _iconAction(
                         icon: Icons.edit_rounded,
                         color: _primaryBlue,
@@ -1152,7 +1636,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
                             ? _showEditStudentModal(user)
                             : _showEditUserModal(user),
                       ),
-                    if (selectedIndex == 4) ...[
+                    if (selectedIndex == 6) ...[
                       _iconAction(
                         icon: Icons.unarchive_rounded,
                         color: _successGreen,
@@ -1176,7 +1660,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
                             _showDeleteConfirmation(user, isStudentData),
                       ),
                     ],
-                    if (selectedIndex != 4) ...[
+                    if (selectedIndex != 6) ...[
                       const SizedBox(width: 6),
                       _iconAction(
                         icon: Icons.archive_rounded,
@@ -1555,6 +2039,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
 
   void _showEditUserModal(Map<String, dynamic> user) {
     final fName = TextEditingController(text: user['firstName']);
+    final mName = TextEditingController(text: user['middleName'] ?? '');
     final lName = TextEditingController(text: user['lastName']);
     final password = TextEditingController();
 
@@ -1593,6 +2078,7 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
 
                   final Map<String, dynamic> updateData = {
                     'firstName': fName.text.trim(),
+                    'middleName': mName.text.trim(),
                     'lastName': lName.text.trim(),
                     'email': finalEmail,
                   };
@@ -1615,6 +2101,12 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
                   TextField(
                   controller: fName,
                   decoration: _inputDecoration('First Name'),
+                  inputFormatters: _textOnlyFormatter,
+                  style: TextStyle(color: _textPrimary),
+                  ),
+                  TextField(
+                  controller: mName,
+                  decoration: _inputDecoration('Middle Name (optional)'),
                   inputFormatters: _textOnlyFormatter,
                   style: TextStyle(color: _textPrimary),
                   ),
@@ -1683,8 +2175,8 @@ class _AdminPageState extends State<AdminPage> with TickerProviderStateMixin {
                   style: TextStyle(color: _textPrimary),
                   ),
                   ],
-                  ),
-                  ),
-                  );
-                }
-                }
+                 ),
+            ),
+        );
+   }
+  }

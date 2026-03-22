@@ -113,9 +113,15 @@ class ActivityDatabase {
         title TEXT NOT NULL,
         code TEXT NOT NULL UNIQUE,
         teacherEmail TEXT NOT NULL,
+        status TEXT DEFAULT 'Active',
         createdAt TEXT DEFAULT (datetime('now'))
       )
     ''');
+    // Add status column to existing DBs that were created before this column
+    try {
+      await db.execute("ALTER TABLE rooms ADD COLUMN status TEXT DEFAULT 'Active'");
+    } catch (_) {}
+    await db.execute("UPDATE rooms SET status = 'Active' WHERE status IS NULL");
 
     // 7. Room members table (guardians who joined)
     await db.execute('''
@@ -561,11 +567,43 @@ class ActivityDatabase {
     }
   }
 
-  /// Returns members of a SPECIFIC room by its code.
-  Future<List<Map<String, dynamic>>> getRoomMembersByCode(String roomCode) async {
+  /// Returns ALL active rooms from all teachers (for admin view)
+  Future<List<Map<String, dynamic>>> getAllRooms() async {
     try {
       final db = await instance.database;
-      final members = await db.query('room_members', where: 'roomCode = ?', whereArgs: [roomCode.toUpperCase().trim()]);
+      return await db.query('rooms', where: 'status = ?', whereArgs: ['Active'], orderBy: 'id DESC');
+    } catch (_) { return []; }
+  }
+
+  /// Returns ALL archived rooms (for admin archive view)
+  Future<List<Map<String, dynamic>>> getArchivedRooms() async {
+    try {
+      final db = await instance.database;
+      return await db.query('rooms', where: 'status = ?', whereArgs: ['Archived'], orderBy: 'id DESC');
+    } catch (_) { return []; }
+  }
+
+  /// Archives a room by code (soft delete)
+  Future<void> archiveRoomByCode(String code) async {
+    try {
+      final db = await instance.database;
+      await db.update('rooms', {'status': 'Archived'}, where: 'code = ?', whereArgs: [code]);
+    } catch (_) {}
+  }
+
+  /// Restores an archived room by code
+  Future<void> restoreRoomByCode(String code) async {
+    try {
+      final db = await instance.database;
+      await db.update('rooms', {'status': 'Active'}, where: 'code = ?', whereArgs: [code]);
+    } catch (_) {}
+  }
+
+  /// Returns members of a specific room by code (for admin detail view)
+  Future<List<Map<String, dynamic>>> getRoomMembersByCode(String code) async {
+    try {
+      final db = await instance.database;
+      final members = await db.query('room_members', where: 'roomCode = ?', whereArgs: [code.toUpperCase().trim()]);
       if (members.isEmpty) return [];
 
       final adminDbPath = join(await getDatabasesPath(), 'user_data.db');
@@ -588,10 +626,7 @@ class ActivityDatabase {
         }
       }
       return result;
-    } catch (e) {
-      debugPrint('getRoomMembersByCode error: $e');
-      return [];
-    }
+    } catch (_) { return []; }
   }
 
   Future<void> deleteRoom(String teacherEmail) async {

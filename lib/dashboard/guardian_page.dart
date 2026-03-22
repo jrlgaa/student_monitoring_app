@@ -38,12 +38,13 @@ class _GuardianPageState extends State<GuardianPage> {
   late TextEditingController _lastNameController;
   late TextEditingController _phoneController;
 
+  List<Map<String, dynamic>> _joinedRooms = [];
   List<Map<String, dynamic>> _activities = [];
   List<Map<String, dynamic>> _announcements = [];
+  List<Map<String, dynamic>> _allAttendance = [];
   final List<Map<String, String>> _myRegisteredStudents = [];
 
   // Room state
-  Map<String, dynamic>? _joinedRoom;
   final TextEditingController _roomCodeController = TextEditingController();
 
   final Map<String, String> _profileData = {
@@ -73,8 +74,8 @@ class _GuardianPageState extends State<GuardianPage> {
 
   Map<String, Map<String, Map<String, dynamic>>> _studentGrades = {};
 
-  final List<String> menuTitles = ['Activities', 'Student Grades', 'Announcements', 'Room', 'Profile'];
-  final List<IconData> menuIcons = [Icons.folder, Icons.school, Icons.campaign, Icons.meeting_room_outlined, Icons.person];
+  final List<String> menuTitles = ['Rooms', 'Student Grades', 'Attendance', 'Profile'];
+  final List<IconData> menuIcons = [Icons.meeting_room_outlined, Icons.school, Icons.calendar_today, Icons.person];
 
   @override
   void initState() {
@@ -101,23 +102,30 @@ class _GuardianPageState extends State<GuardianPage> {
   Future<void> _fetchDatabaseData() async {
     setState(() => isLoading = true);
     try {
-      // Use the singleton — avoids opening a conflicting connection to teacher_data.db
       final teacherDb = await ActivityDatabase.instance.database;
 
-      // Check if guardian has joined a room
-      final joinedRoom = await ActivityDatabase.instance.getJoinedRoom(widget.loggedInEmail);
+      // Load ALL rooms this guardian joined
+      final joinedRooms = await ActivityDatabase.instance.getJoinedRooms(widget.loggedInEmail);
 
       List<Map<String, dynamic>> activityMaps = [];
       List<Map<String, dynamic>> announcementMaps = [];
 
-      // Only load activities/announcements if guardian has joined a room
-      if (joinedRoom != null) {
-        activityMaps = await teacherDb.query('activities', orderBy: 'id DESC');
-        announcementMaps = await teacherDb.query('announcements', orderBy: 'id DESC');
+      if (joinedRooms.isNotEmpty) {
+        final roomCodes = joinedRooms.map((r) => "'${r['code']}'").join(',');
+        // Only load activities/announcements from joined rooms
+        final allActivities = await teacherDb.query('activities', orderBy: 'id DESC');
+        final allAnnouncements = await teacherDb.query('announcements', orderBy: 'id DESC');
+        activityMaps = allActivities.where((a) =>
+            roomCodes.contains("'${a['roomCode']}'")).toList();
+        announcementMaps = allAnnouncements.where((a) =>
+            roomCodes.contains("'${a['roomCode']}'")).toList();
       }
 
-      final adminDb = await DatabaseHelper.instance.database;
+      // Load real grades from DB
+      final allGrades = await ActivityDatabase.instance.getAllGrades();
+      final allAttendance = await ActivityDatabase.instance.getAllAttendance();
 
+      final adminDb = await DatabaseHelper.instance.database;
       try {
         await adminDb.execute('''
           CREATE TABLE IF NOT EXISTS guardian_students (
@@ -133,10 +141,7 @@ class _GuardianPageState extends State<GuardianPage> {
       }
 
       final List<Map<String, dynamic>> guardianMaps = await adminDb.query(
-        'users',
-        where: 'email = ?',
-        whereArgs: [widget.loggedInEmail],
-        limit: 1,
+        'users', where: 'email = ?', whereArgs: [widget.loggedInEmail], limit: 1,
       );
 
       if (guardianMaps.isNotEmpty) {
@@ -159,19 +164,17 @@ class _GuardianPageState extends State<GuardianPage> {
         final List<Map<String, dynamic>> links = await adminDb.rawQuery('''
           SELECT s.* FROM students s
           JOIN guardian_students gs ON s.id = gs.student_id
-          WHERE gs.guardian_id = ?
-          AND s.status = 'Active'
+          WHERE gs.guardian_id = ? AND s.status = 'Active'
         ''', [currentGuardianId]);
         linkedStudents = links;
       }
 
-      // Do NOT close teacherDb — it's the singleton, closing it breaks other sessions
-
       setState(() {
-        _joinedRoom = joinedRoom;
+        _joinedRooms = List<Map<String, dynamic>>.from(joinedRooms);
         _activities = activityMaps;
         _announcements = announcementMaps;
-        _initGuardianGrades();
+        _allAttendance = List<Map<String, dynamic>>.from(allAttendance);
+        _initGuardianGrades(allGrades);
         isLoading = false;
       });
     } catch (e) {
@@ -194,16 +197,44 @@ class _GuardianPageState extends State<GuardianPage> {
     }
   }
 
-  void _initGuardianGrades() {
+  void _initGuardianGrades(List<Map<String, dynamic>> allGrades) {
+    _studentGrades = {};
+
+    // Guardian's own name — teacher keys grades by guardian's name (from room_members → users table)
+    final guardianName = _getFullName.trim();
+    // Capitalized version (teacher applies _capitalizeName)
+    final guardianNameCapitalized = guardianName.split(' ')
+        .where((w) => w.isNotEmpty)
+        .map((w) => w[0].toUpperCase() + w.substring(1).toLowerCase())
+        .join(' ');
+
     for (var studentMap in linkedStudents) {
-      String studentKey = '${studentMap['firstName']} ${studentMap['lastName']}';
-      _studentGrades[studentKey] = {};
+      final fullName = _formatFullName(studentMap);
+      final firstLast = '${studentMap['firstName'] ?? ''} ${studentMap['lastName'] ?? ''}'.trim();
+      _studentGrades[fullName] = {};
+
       for (var activity in _activities) {
-        String key = '${activity['title']}_${activity['date']}';
-        _studentGrades[studentKey]![key] = {
-          'grade': 85.0,
+        final key = '${activity['title']}_${activity['date']}';
+        // Teacher keys grade by guardian's name (not student's name)
+        // Try: guardian name, guardian capitalized, student fullName, student firstLast
+        final gradeRow = allGrades.where((g) {
+          final sn = (g['studentName'] ?? '').toString().trim();
+          final ak = (g['activityKey'] ?? '').toString();
+          return ak == key && (
+              sn == guardianName ||
+                  sn == guardianNameCapitalized ||
+                  sn.toLowerCase() == guardianName.toLowerCase() ||
+                  sn == fullName ||
+                  sn == firstLast ||
+                  sn.toLowerCase() == fullName.toLowerCase() ||
+                  sn.toLowerCase() == firstLast.toLowerCase()
+          );
+        }).firstOrNull;
+
+        _studentGrades[fullName]![key] = {
+          'grade': gradeRow?['grade'],
           'maxScore': 100.0,
-          'status': 'Graded'
+          'status': gradeRow?['status'] ?? 'Pending',
         };
       }
     }
@@ -402,7 +433,16 @@ class _GuardianPageState extends State<GuardianPage> {
                 onTap: () => setState(() { selectedIndex = index; isSidebarOpen = false; }),
               );
             })),
-            ListTile(title: const Text("Dark Mode"), trailing: Switch(value: widget.isDarkMode, onChanged: (_) => widget.toggleTheme())),
+            ListTile(
+              leading: Icon(widget.isDarkMode ? Icons.light_mode : Icons.dark_mode, color: widget.isDarkMode ? const Color(0xFFFFE082) : Colors.black54),
+              title: Text(widget.isDarkMode ? 'Light Mode' : 'Dark Mode', style: TextStyle(color: widget.isDarkMode ? const Color(0xFFFFE082) : null)),
+              trailing: Switch(
+                value: widget.isDarkMode,
+                onChanged: (_) => widget.toggleTheme(),
+                activeColor: widget.isDarkMode ? const Color(0xFFFFE082) : null,
+                activeTrackColor: widget.isDarkMode ? const Color(0xFFFFE082).withOpacity(0.4) : null,
+              ),
+            ),
             ListTile(leading: const Icon(Icons.logout, color: Colors.redAccent), title: const Text('Logout', style: TextStyle(color: Colors.redAccent)), onTap: () => Navigator.pushReplacementNamed(context, '/login')),
             const SizedBox(height: 20),
           ],
@@ -414,11 +454,10 @@ class _GuardianPageState extends State<GuardianPage> {
   Widget _buildSection() {
     if (isLoading) return const Center(child: CircularProgressIndicator());
     switch (selectedIndex) {
-      case 0: return _activitySection();
+      case 0: return _roomsSection();
       case 1: return _studentGradesSection();
-      case 2: return _announcementsSection();
-      case 3: return _roomSection();
-      case 4: return _genericSection('Guardian Profile', _profileContent());
+      case 2: return _attendanceSection();
+      case 3: return _genericSection('Guardian Profile', _profileContent());
       default: return const SizedBox();
     }
   }
@@ -448,10 +487,11 @@ class _GuardianPageState extends State<GuardianPage> {
           _buildProfileField('Account ID', _formattedAccountId, isEditable: false),
           _buildProfileField('Full Name', fullName, isEditable: false),
           _buildProfileField('Email Address', email, isEditable: false),
-          _buildProfileField('Phone Number', '+63 ${_profileData['phone'] ?? ''}',
+          _buildProfileField('Phone Number', _profileData['phone']?.isNotEmpty == true ? '+63 ${_profileData['phone']}' : 'Not set',
             controller: _phoneController, isEditing: isEditing,
-            hint: '+63 9XXX XXXX XXXX', keyboardType: TextInputType.phone,
-            formatters: [LengthLimitingTextInputFormatter(17)],
+            hint: '9XX XXXX XXXX', keyboardType: TextInputType.phone,
+            formatters: [PhoneNumberFormatter()],
+            prefix: '+63 ',
           ),
           const SizedBox(height: 30),
           SizedBox(
@@ -459,10 +499,15 @@ class _GuardianPageState extends State<GuardianPage> {
             child: ElevatedButton.icon(
               onPressed: () async {
                 if (isEditing) {
-                  setState(() { _profileData['phone'] = _phoneController.text.trim(); isEditing = false; });
+                  // Save: strip any non-digit chars, store raw digits after +63
+                  final raw = _phoneController.text.replaceAll(RegExp(r'[^\d]'), '');
+                  setState(() { _profileData['phone'] = raw; isEditing = false; });
                   await _updateProfileInDatabase();
                   if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated successfully')));
                 } else {
+                  // Pre-fill controller with existing digits (without +63)
+                  final existing = (_profileData['phone'] ?? '').toString().replaceAll(RegExp(r'[^\d]'), '');
+                  _phoneController.text = existing.isEmpty ? '9' : existing;
                   setState(() => isEditing = true);
                 }
               },
@@ -483,6 +528,7 @@ class _GuardianPageState extends State<GuardianPage> {
   Widget _buildProfileField(String label, String value, {
     TextEditingController? controller, bool isEditing = false, bool isEditable = true,
     String? hint, TextInputType? keyboardType, List<TextInputFormatter>? formatters,
+    String? prefix,
   }) {
     final bool showInput = isEditing && isEditable;
     return Padding(
@@ -495,7 +541,13 @@ class _GuardianPageState extends State<GuardianPage> {
           if (showInput)
             TextField(
               controller: controller, keyboardType: keyboardType, inputFormatters: formatters,
-              decoration: InputDecoration(hintText: hint, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+              decoration: InputDecoration(
+                hintText: hint,
+                prefixText: prefix,
+                prefixStyle: const TextStyle(fontWeight: FontWeight.w500),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              ),
             )
           else
             Container(
@@ -523,12 +575,12 @@ class _GuardianPageState extends State<GuardianPage> {
             const SizedBox(height: 16),
             Text('No room joined yet', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey[600])),
             const SizedBox(height: 8),
-            Text('Go to "Room" and enter the room code given by your teacher to view activities and announcements.', textAlign: TextAlign.center, style: TextStyle(fontSize: 14, color: Colors.grey[500])),
+            Text('Go to "Rooms" and enter the room code given by your teacher.', textAlign: TextAlign.center, style: TextStyle(fontSize: 14, color: Colors.grey[500])),
             const SizedBox(height: 24),
             ElevatedButton.icon(
-              onPressed: () => setState(() => selectedIndex = 3),
+              onPressed: () => setState(() => selectedIndex = 0),
               icon: const Icon(Icons.meeting_room_outlined),
-              label: const Text('Go to Room'),
+              label: const Text('Go to Rooms'),
               style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
             ),
           ],
@@ -537,149 +589,112 @@ class _GuardianPageState extends State<GuardianPage> {
     );
   }
 
-  Widget _activitySection() {
-    if (_joinedRoom == null) return _genericSection('Teacher Activities', _noRoomJoinedWall());
-    return _genericSection('Teacher Activities', RefreshIndicator(
+  Widget _roomsSection() {
+    return _genericSection('Rooms', RefreshIndicator(
       onRefresh: _fetchDatabaseData,
-      child: _activities.isEmpty ? const Center(child: Text("No activities.")) : ListView.builder(
+      child: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 24),
-        itemCount: _activities.length,
-        itemBuilder: (context, index) {
-          final act = _activities[index];
-          return Card(
-            color: widget.isDarkMode ? Colors.grey[850] : Colors.white,
-            margin: const EdgeInsets.only(bottom: 16),
-            child: ListTile(
-              title: Text(act['title'] ?? 'Untitled', style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text("Posted: ${act['date']}"),
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => ActivityDetailPage(activity: act, isDarkMode: widget.isDarkMode))),
+        children: [
+          const SizedBox(height: 16),
+          // Join a new room
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: widget.isDarkMode ? Colors.grey[850] : Colors.grey[100],
+              borderRadius: BorderRadius.circular(16),
             ),
-          );
-        },
-      ),
-    ));
-  }
-
-  Widget _announcementsSection() {
-    if (_joinedRoom == null) return _genericSection('Announcements', _noRoomJoinedWall());
-    return _genericSection('Announcements', RefreshIndicator(
-      onRefresh: _fetchDatabaseData,
-      child: _announcements.isEmpty ? const Center(child: Text("No announcements.")) : ListView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        itemCount: _announcements.length,
-        itemBuilder: (context, index) {
-          final ann = _announcements[index];
-          return Card(
-            color: widget.isDarkMode ? Colors.grey[850] : Colors.white,
-            margin: const EdgeInsets.only(bottom: 12),
-            child: ListTile(
-              title: Text(ann['title'] ?? 'School Update', style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text(ann['date'] ?? ''),
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => AnnouncementDetailPage(announcement: ann, isDarkMode: widget.isDarkMode))),
-            ),
-          );
-        },
-      ),
-    ));
-  }
-
-  Widget _roomSection() {
-    return _genericSection('Room', RefreshIndicator(
-      onRefresh: _fetchDatabaseData,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SizedBox(height: 20),
-
-            if (_joinedRoom == null) ...[
-              // Not in a room — show join UI
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: widget.isDarkMode ? Colors.grey[850] : Colors.grey[100],
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Join a Room', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    Text('Enter the 6-character code given by your teacher.', style: TextStyle(fontSize: 13, color: Colors.grey[600])),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _roomCodeController,
-                      textCapitalization: TextCapitalization.characters,
-                      maxLength: 6,
-                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 6),
-                      textAlign: TextAlign.center,
-                      decoration: InputDecoration(
-                        hintText: 'XXXXXX',
-                        hintStyle: TextStyle(color: Colors.grey[400], letterSpacing: 6),
-                        filled: true,
-                        fillColor: widget.isDarkMode ? Colors.grey[800] : Colors.white,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        counterText: '',
-                      ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Join a Room', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: _roomCodeController,
+                    textCapitalization: TextCapitalization.characters,
+                    maxLength: 6,
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 4),
+                    textAlign: TextAlign.center,
+                    decoration: InputDecoration(
+                      hintText: 'XXXXXX',
+                      hintStyle: TextStyle(color: Colors.grey[400], letterSpacing: 4),
+                      filled: true,
+                      fillColor: widget.isDarkMode ? Colors.grey[800] : Colors.white,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      counterText: '',
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
                     ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: isLinking ? null : _joinRoom,
-                        icon: isLinking
-                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                            : const Icon(Icons.login),
-                        label: Text(isLinking ? 'Joining...' : 'Join Room'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue, foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                ElevatedButton(
+                  onPressed: isLinking ? null : _joinRoom,
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16)),
+                  child: isLinking
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('Join'),
+                ),
+              ]),
+            ]),
+          ),
+          const SizedBox(height: 20),
+          if (_joinedRooms.isEmpty)
+            Center(child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(children: [
+                Icon(Icons.meeting_room_outlined, size: 64, color: Colors.grey[300]),
+                const SizedBox(height: 12),
+                Text('No rooms joined yet.', style: TextStyle(color: Colors.grey[500], fontSize: 16)),
+                const SizedBox(height: 8),
+                Text('Enter a room code above to join your teacher\'s room.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+              ]),
+            ))
+          else
+            ...(_joinedRooms.map((room) {
+              final roomCode = room['code'].toString();
+              final roomActivities = _activities.where((a) => a['roomCode'] == roomCode).toList();
+              final roomAnnouncements = _announcements.where((a) => a['roomCode'] == roomCode).toList();
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                color: Colors.blue.withOpacity(0.07),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => GuardianRoomDetailPage(
+                      room: room,
+                      activities: roomActivities,
+                      announcements: roomAnnouncements,
+                      studentGrades: _studentGrades,
+                      linkedStudents: linkedStudents,
+                      isDarkMode: widget.isDarkMode,
+                    ),
+                  )),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(children: [
+                      const Icon(Icons.meeting_room, color: Colors.blue, size: 36),
+                      const SizedBox(width: 14),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(room['title'] ?? '', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 4),
+                        Text('${roomActivities.length} activities • ${roomAnnouncements.length} announcements', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                      ])),
+                      // Leave button
+                      GestureDetector(
+                        onTap: () => _leaveSpecificRoom(room),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(border: Border.all(color: Colors.redAccent), borderRadius: BorderRadius.circular(8)),
+                          child: const Text('Leave', style: TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.w600)),
                         ),
                       ),
-                    ),
-                  ],
+                    ]),
+                  ),
                 ),
-              ),
-            ] else ...[
-              // Already in a room — show room info
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
-                ),
-                child: Column(
-                  children: [
-                    const Icon(Icons.meeting_room, size: 48, color: Colors.blue),
-                    const SizedBox(height: 12),
-                    Text(_joinedRoom!['title'] ?? 'Classroom', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 6),
-                    Text('Room Code: ${_joinedRoom!['code']}', style: const TextStyle(fontSize: 16, letterSpacing: 4, color: Colors.blue, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 4),
-                    Text('You are connected to this teacher\'s room.', style: TextStyle(fontSize: 13, color: Colors.grey[600])),
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _leaveRoom,
-                        icon: const Icon(Icons.logout, color: Colors.redAccent),
-                        label: const Text('Leave Room', style: TextStyle(color: Colors.redAccent)),
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Colors.redAccent),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
-        ),
+              );
+            })).toList(),
+          const SizedBox(height: 80),
+        ],
       ),
     ));
   }
@@ -692,63 +707,45 @@ class _GuardianPageState extends State<GuardianPage> {
       );
       return;
     }
+    // Check if already joined this room
+    if (_joinedRooms.any((r) => r['code'].toString() == code)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You have already joined this room.'), backgroundColor: Colors.orange),
+      );
+      return;
+    }
     setState(() => isLinking = true);
     try {
-      // --- DIAGNOSTIC: show everything in the DB ---
-      final db = await ActivityDatabase.instance.database;
-      final tables = await db.rawQuery("SELECT name FROM sqlite_master WHERE type='table'");
-      debugPrint('=== TABLES IN teacher_data.db: $tables');
-      try {
-        final allRooms = await db.query('rooms');
-        debugPrint('=== ALL ROOMS: $allRooms');
-        debugPrint('=== GUARDIAN TRYING CODE: "$code"');
-      } catch (e) {
-        debugPrint('=== rooms table does not exist: $e');
-      }
-      // --- END DIAGNOSTIC ---
-
       final success = await ActivityDatabase.instance.joinRoom(code, widget.loggedInEmail);
       if (success) {
-        final room = await ActivityDatabase.instance.getJoinedRoom(widget.loggedInEmail);
-        setState(() {
-          _joinedRoom = room;
-          isLinking = false;
-        });
         _roomCodeController.clear();
+        await _fetchDatabaseData();
         if (mounted) {
+          final joined = _joinedRooms.firstWhere((r) => r['code'] == code, orElse: () => {});
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Joined room: ${room?['title'] ?? code}'), backgroundColor: Colors.green),
+            SnackBar(content: Text('Joined room: ${joined['title'] ?? code}'), backgroundColor: Colors.green),
           );
         }
-        await _fetchDatabaseData();
       } else {
-        setState(() => isLinking = false);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Room not found. Check the code and try again.'),
-              backgroundColor: Colors.orange,
-              duration: Duration(seconds: 4),
-            ),
+            const SnackBar(content: Text('Room not found. Check the code and try again.'), backgroundColor: Colors.orange, duration: Duration(seconds: 4)),
           );
         }
       }
     } catch (e) {
-      setState(() => isLinking = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red, duration: const Duration(seconds: 5)),
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => isLinking = false);
     }
   }
 
-  Future<void> _leaveRoom() async {
+  Future<void> _leaveSpecificRoom(Map<String, dynamic> room) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Leave Room'),
-        content: const Text('Are you sure you want to leave this room? You will no longer see activities and announcements.'),
+        content: Text('Leave "${room['title']}"? You won\'t see its activities anymore.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           ElevatedButton(
@@ -760,20 +757,274 @@ class _GuardianPageState extends State<GuardianPage> {
       ),
     );
     if (confirmed != true) return;
-    await ActivityDatabase.instance.leaveRoom(widget.loggedInEmail);
-    setState(() {
-      _joinedRoom = null;
-      _activities = [];
-      _announcements = [];
-    });
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('You have left the room.')),
-      );
-    }
+    await ActivityDatabase.instance.leaveRoomByCode(room['code'].toString(), widget.loggedInEmail);
+    await _fetchDatabaseData();
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Left the room.')));
   }
 
-  Widget _studentGradesSection() => _genericSection('Student Grades', const Center(child: Text("Grades Logic")));
+  Widget _attendanceSection() {
+    if (_joinedRooms.isEmpty) return _genericSection('Attendance', _noRoomJoinedWall());
+
+    final guardianName = _getFullName.trim();
+    final guardianNameCap = guardianName.split(' ')
+        .where((w) => w.isNotEmpty)
+        .map((w) => w[0].toUpperCase() + w.substring(1).toLowerCase())
+        .join(' ');
+
+    // All records matching this guardian
+    final allRecords = _allAttendance.where((r) {
+      final sn = (r['studentName'] ?? '').toString().trim();
+      return sn == guardianName || sn == guardianNameCap ||
+          sn.toLowerCase() == guardianName.toLowerCase();
+    }).toList();
+
+    // Overall counts across all rooms
+    final totalPresent = allRecords.where((r) => r['status'] == 'Present').length;
+    final totalAbsent = allRecords.where((r) => r['status'] == 'Absent').length;
+    final totalLate = allRecords.where((r) => r['status'] == 'Late').length;
+    final totalAll = allRecords.length;
+
+    return _genericSection('Attendance', RefreshIndicator(
+      onRefresh: _fetchDatabaseData,
+      child: allRecords.isEmpty
+          ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(Icons.calendar_today_outlined, size: 64, color: Colors.grey[300]),
+        const SizedBox(height: 16),
+        Text('No attendance records yet.', style: TextStyle(color: Colors.grey[500], fontSize: 16)),
+      ]))
+          : ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: [
+          const SizedBox(height: 8),
+          // 1. Overall summary
+          Container(
+            margin: const EdgeInsets.only(bottom: 20),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.blue.withOpacity(0.07),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.blue.withOpacity(0.2)),
+            ),
+            child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+              _attendanceStat('Total', totalAll.toString(), Colors.blue),
+              _attendanceStat('Present', totalPresent.toString(), Colors.green),
+              _attendanceStat('Late', totalLate.toString(), Colors.orange.shade700),
+              _attendanceStat('Absent', totalAbsent.toString(), Colors.red),
+            ]),
+          ),
+          // 2. Per-room: room name → records
+          ..._joinedRooms.map((room) {
+            final roomCode = room['code'].toString();
+            final roomTitle = room['title']?.toString() ?? roomCode;
+            final isFirstRoom = roomCode == _joinedRooms.first['code'].toString();
+
+            final roomRecords = allRecords.where((r) {
+              final rc = (r['roomCode'] ?? '').toString().trim();
+              return rc == roomCode || (rc.isEmpty && isFirstRoom);
+            }).toList();
+
+            if (roomRecords.isEmpty) return const SizedBox.shrink();
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                // Room name header
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.meeting_room, size: 16, color: Colors.blue),
+                    const SizedBox(width: 8),
+                    Text(roomTitle, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Colors.blue)),
+                  ]),
+                ),
+                const SizedBox(height: 10),
+                // Attendance records
+                ...roomRecords.map((r) {
+                  final status = (r['status'] ?? '').toString();
+                  final date = (r['date'] ?? '').toString();
+                  Color statusColor = Colors.grey[500]!;
+                  IconData statusIcon = Icons.radio_button_unchecked;
+                  if (status == 'Present') { statusColor = Colors.green; statusIcon = Icons.check_circle; }
+                  else if (status == 'Late') { statusColor = Colors.orange.shade700; statusIcon = Icons.watch_later; }
+                  else if (status == 'Absent') { statusColor = Colors.red; statusIcon = Icons.cancel; }
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: widget.isDarkMode ? Colors.grey.shade700 : Colors.grey.shade200),
+                      borderRadius: BorderRadius.circular(10),
+                      color: widget.isDarkMode ? Colors.grey[850] : Colors.white,
+                    ),
+                    child: Row(children: [
+                      Icon(Icons.calendar_today, size: 16, color: Colors.grey[500]),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text(date, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500))),
+                      Icon(statusIcon, size: 18, color: statusColor),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: statusColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: statusColor.withOpacity(0.4)),
+                        ),
+                        child: Text(status, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: statusColor)),
+                      ),
+                    ]),
+                  );
+                }).toList(),
+              ]),
+            );
+          }).toList(),
+          const SizedBox(height: 24),
+        ],
+      ),
+    ));
+  }
+
+  Widget _attendanceStat(String label, String value, Color color) {
+    return Column(children: [
+      Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color)),
+      const SizedBox(height: 2),
+      Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+    ]);
+  }
+
+  Widget _studentGradesSection() {
+    if (_joinedRooms.isEmpty) return _genericSection('Student Grades', _noRoomJoinedWall());
+    if (linkedStudents.isEmpty) {
+      return _genericSection('Student Grades', Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.school_outlined, size: 64, color: Colors.grey[300]),
+            const SizedBox(height: 16),
+            Text('No linked students.', style: TextStyle(fontSize: 16, color: Colors.grey[500])),
+          ]),
+        ),
+      ));
+    }
+
+    return _genericSection('Student Grades', ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: linkedStudents.length,
+      itemBuilder: (context, si) {
+        final student = linkedStudents[si];
+        final name = _formatFullName(student);
+        final grades = _studentGrades[name] ?? {};
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: ExpansionTile(
+            leading: CircleAvatar(backgroundColor: Colors.blue.shade100, child: Text(name[0].toUpperCase())),
+            title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if ((student['lrn'] ?? 0) != 0)
+                Text('LRN: ${_formatLRN(student['lrn'] as int)}', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+            ]),
+            children: [
+              // Per-room breakdown
+              ..._joinedRooms.map((room) {
+                final roomCode = room['code'].toString();
+                final roomTitle = room['title']?.toString() ?? roomCode;
+                final roomActivities = _activities.where((a) => a['roomCode'] == roomCode).toList();
+
+                if (roomActivities.isEmpty) return const SizedBox.shrink();
+
+                // Per-room average
+                double roomTotal = 0; int roomGraded = 0;
+                for (final act in roomActivities) {
+                  final key = '${act['title']}_${act['date']}';
+                  final data = grades[key] ?? {};
+                  final s = (data['status'] ?? 'Pending') as String;
+                  if ((s == 'Completed' || s == 'Late') && data['grade'] != null) {
+                    roomTotal += (data['grade'] as double); roomGraded++;
+                  }
+                }
+                final roomAvg = roomGraded > 0 ? (roomTotal / roomGraded).toStringAsFixed(1) : '—';
+
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    // Room header
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(children: [
+                        const Icon(Icons.meeting_room, size: 16, color: Colors.blue),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text(roomTitle, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Colors.blue))),
+                      ]),
+                    ),
+                    const SizedBox(height: 8),
+                    // Activities in this room
+                    ...roomActivities.map((act) {
+                      final key = '${act['title']}_${act['date']}';
+                      final gradeData = grades[key] ?? {};
+                      final rawGrade = gradeData['grade'];
+                      final status = (gradeData['status'] ?? 'Pending') as String;
+                      final scoreText = status == 'Missed' ? '0 / 100'
+                          : rawGrade != null ? '${(rawGrade as double).toStringAsFixed(0)} / 100'
+                          : 'Not graded';
+                      Color statusColor = Colors.grey[500]!;
+                      if (status == 'Completed') statusColor = Colors.green;
+                      else if (status == 'Late') statusColor = Colors.orange.shade700;
+                      else if (status == 'Missed') statusColor = Colors.red;
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: widget.isDarkMode ? Colors.grey.shade700 : Colors.grey.shade200),
+                          borderRadius: BorderRadius.circular(8),
+                          color: widget.isDarkMode ? Colors.grey[850] : Colors.grey[50],
+                        ),
+                        child: Row(children: [
+                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(act['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                            Text(act['date'] ?? '', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                          ])),
+                          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                              child: Text(status, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: statusColor)),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(scoreText, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                          ]),
+                        ]),
+                      );
+                    }).toList(),
+                    // Per-room average
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                        const Text('Average', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.green, fontSize: 13)),
+                        Text('$roomAvg / 100', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 15)),
+                      ]),
+                    ),
+                  ]),
+                );
+              }).toList(),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    ));
+  }
 }
 
 // --- Detail Page Classes ---
@@ -847,6 +1098,504 @@ class ActivityDetailPage extends StatelessWidget {
             ),
         ]),
       ),
+    );
+  }
+}
+// ── Guardian Room Detail Page ─────────────────────────────────────────────
+
+class GuardianRoomDetailPage extends StatefulWidget {
+  final Map<String, dynamic> room;
+  final List<Map<String, dynamic>> activities;
+  final List<Map<String, dynamic>> announcements;
+  final Map<String, Map<String, Map<String, dynamic>>> studentGrades;
+  final List<Map<String, dynamic>> linkedStudents;
+  final bool isDarkMode;
+
+  const GuardianRoomDetailPage({
+    super.key,
+    required this.room,
+    required this.activities,
+    required this.announcements,
+    required this.studentGrades,
+    required this.linkedStudents,
+    required this.isDarkMode,
+  });
+
+  @override
+  State<GuardianRoomDetailPage> createState() => _GuardianRoomDetailPageState();
+}
+
+class _GuardianRoomDetailPageState extends State<GuardianRoomDetailPage> {
+  int _tabIndex = 0;
+
+  String _formatFullName(Map<String, dynamic> s) {
+    final first = (s['firstName'] ?? '').toString().trim();
+    final mid = (s['middleName'] ?? '').toString().trim();
+    final last = (s['lastName'] ?? '').toString().trim();
+    return mid.isEmpty ? '$first $last'.trim() : '$first $mid $last'.trim();
+  }
+
+  void _showImagePreview(BuildContext ctx, List<String> paths, int initial) {
+    final controller = PageController(initialPage: initial);
+    showDialog(
+      context: ctx,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(children: [
+          PageView.builder(
+            controller: controller,
+            itemCount: paths.length,
+            itemBuilder: (_, i) {
+              final f = File(paths[i]);
+              return Center(
+                child: f.existsSync()
+                    ? InteractiveViewer(child: Image.file(f, fit: BoxFit.contain))
+                    : const Icon(Icons.broken_image, color: Colors.white, size: 64),
+              );
+            },
+          ),
+          Positioned(
+            top: 12, right: 12,
+            child: GestureDetector(
+              onTap: () => Navigator.pop(ctx),
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                child: const Icon(Icons.close, color: Colors.white, size: 20),
+              ),
+            ),
+          ),
+          if (paths.length > 1)
+            Positioned(
+              bottom: 16, left: 0, right: 0,
+              child: Center(child: Text('${initial + 1} / ${paths.length}', style: const TextStyle(color: Colors.white70, fontSize: 13))),
+            ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _tab(String label, int idx) => Expanded(
+    child: InkWell(
+      onTap: () => setState(() => _tabIndex = idx),
+      child: Container(
+        height: 46, alignment: Alignment.center,
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: _tabIndex == idx ? Colors.white : Colors.transparent, width: 3)),
+        ),
+        child: Text(label, style: TextStyle(
+            color: _tabIndex == idx ? Colors.white : Colors.white60,
+            fontWeight: FontWeight.w600, fontSize: 13)),
+      ),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: widget.isDarkMode ? Colors.grey[900] : Colors.grey[50],
+      appBar: AppBar(
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+        title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(widget.room['title'] ?? 'Room', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+        ]),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(46),
+          child: Row(children: [
+            _tab('Activities (${widget.activities.length})', 0),
+            _tab('Announcements', 1),
+          ]),
+        ),
+      ),
+      body: _tabIndex == 0 ? _buildActivities() : _buildAnnouncements(),
+    );
+  }
+
+  Widget _buildActivities() {
+    if (widget.activities.isEmpty) {
+      return const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(Icons.folder_open, size: 64, color: Colors.grey),
+        SizedBox(height: 16),
+        Text('No activities posted yet.', style: TextStyle(color: Colors.grey)),
+      ]));
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: widget.activities.length,
+      itemBuilder: (context, i) {
+        final act = widget.activities[i];
+        final deadline = (act['deadline'] ?? '').toString();
+        final hasDeadline = deadline.isNotEmpty;
+        final isOverdue = hasDeadline && DateTime.tryParse(deadline)?.isBefore(DateTime.now()) == true;
+        final imagePaths = (act['filePath'] ?? '').toString().split('|').where((s) => s.isNotEmpty).toList();
+
+        // Get student status for this activity
+        String studentStatus = 'Pending';
+        Color statusColor = Colors.grey[500]!;
+        for (final student in widget.linkedStudents) {
+          final name = _formatFullName(student);
+          final firstLast = '${student['firstName'] ?? ''} ${student['lastName'] ?? ''}'.trim();
+          final key = '${act['title']}_${act['date']}';
+          final gradeData = widget.studentGrades[name]?[key]
+              ?? widget.studentGrades[firstLast]?[key] ?? {};
+          studentStatus = (gradeData['status'] ?? 'Pending') as String;
+          if (studentStatus == 'Completed') statusColor = Colors.green;
+          else if (studentStatus == 'Late') statusColor = Colors.orange.shade700;
+          else if (studentStatus == 'Missed') statusColor = Colors.red;
+        }
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => GuardianActivityDetailPage(
+                activity: act,
+                studentStatus: studentStatus,
+                statusColor: statusColor,
+                isDarkMode: widget.isDarkMode,
+                studentGrades: widget.studentGrades,
+                linkedStudents: widget.linkedStudents,
+              ),
+            )),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(children: [
+                const CircleAvatar(backgroundColor: Colors.blue, radius: 18, child: Icon(Icons.assignment, color: Colors.white, size: 18)),
+                const SizedBox(width: 12),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(act['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                  Text('Posted: ${act['date'] ?? ''}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  if (hasDeadline) ...[
+                    const SizedBox(height: 4),
+                    Text(isOverdue ? '⚠ Overdue: $deadline' : 'Due: $deadline',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: isOverdue ? Colors.red : Colors.orange)),
+                  ],
+                ])),
+                const SizedBox(width: 8),
+                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(6), border: Border.all(color: statusColor.withOpacity(0.4))),
+                    child: Text(studentStatus, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: statusColor)),
+                  ),
+                  if (imagePaths.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Row(children: [const Icon(Icons.image, size: 12, color: Colors.grey), const SizedBox(width: 2), Text('${imagePaths.length}', style: const TextStyle(fontSize: 11, color: Colors.grey))]),
+                  ],
+                ]),
+                const SizedBox(width: 4),
+                const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
+              ]),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAnnouncements() {
+    if (widget.announcements.isEmpty) {
+      return const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(Icons.campaign_outlined, size: 64, color: Colors.grey),
+        SizedBox(height: 16),
+        Text('No announcements yet.', style: TextStyle(color: Colors.grey)),
+      ]));
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: widget.announcements.length,
+      itemBuilder: (context, i) {
+        final ann = widget.announcements[i];
+        final imagePaths = (ann['imagePaths'] ?? '').toString().split('|').where((s) => s.isNotEmpty).toList();
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => GuardianAnnouncementDetailPage(
+                announcement: ann,
+                isDarkMode: widget.isDarkMode,
+              ),
+            )),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(children: [
+                const CircleAvatar(backgroundColor: Colors.orange, radius: 18, child: Icon(Icons.campaign, color: Colors.white, size: 18)),
+                const SizedBox(width: 12),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(ann['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                  Text(ann['date'] ?? '', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  if ((ann['message'] ?? '').toString().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(ann['message'] ?? '', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                  ],
+                ])),
+                const SizedBox(width: 8),
+                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  if (imagePaths.isNotEmpty)
+                    Row(children: [const Icon(Icons.image, size: 12, color: Colors.grey), const SizedBox(width: 2), Text('${imagePaths.length}', style: const TextStyle(fontSize: 11, color: Colors.grey))]),
+                ]),
+                const SizedBox(width: 4),
+                const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
+              ]),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ── Guardian Activity Detail Page ────────────────────────────────────────────
+class GuardianActivityDetailPage extends StatelessWidget {
+  final Map<String, dynamic> activity;
+  final String studentStatus;
+  final Color statusColor;
+  final bool isDarkMode;
+  final Map<String, Map<String, Map<String, dynamic>>> studentGrades;
+  final List<Map<String, dynamic>> linkedStudents;
+
+  const GuardianActivityDetailPage({
+    super.key,
+    required this.activity,
+    required this.studentStatus,
+    required this.statusColor,
+    required this.isDarkMode,
+    required this.studentGrades,
+    required this.linkedStudents,
+  });
+
+  String _formatFullName(Map<String, dynamic> s) {
+    final first = (s['firstName'] ?? '').toString().trim();
+    final mid = (s['middleName'] ?? '').toString().trim();
+    final last = (s['lastName'] ?? '').toString().trim();
+    return mid.isEmpty ? '$first $last'.trim() : '$first $mid $last'.trim();
+  }
+
+  void _showImagePreview(BuildContext ctx, List<String> paths, int initial) {
+    final controller = PageController(initialPage: initial);
+    showDialog(
+      context: ctx,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(children: [
+          PageView.builder(
+            controller: controller,
+            itemCount: paths.length,
+            itemBuilder: (_, i) {
+              final f = File(paths[i]);
+              return Center(
+                child: f.existsSync()
+                    ? InteractiveViewer(child: Image.file(f, fit: BoxFit.contain))
+                    : const Icon(Icons.broken_image, color: Colors.white, size: 64),
+              );
+            },
+          ),
+          Positioned(top: 12, right: 12,
+            child: GestureDetector(
+              onTap: () => Navigator.pop(ctx),
+              child: Container(padding: const EdgeInsets.all(6), decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle), child: const Icon(Icons.close, color: Colors.white, size: 20)),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final deadline = (activity['deadline'] ?? '').toString();
+    final hasDeadline = deadline.isNotEmpty;
+    final isOverdue = hasDeadline && DateTime.tryParse(deadline)?.isBefore(DateTime.now()) == true;
+    final imagePaths = (activity['filePath'] ?? '').toString().split('|').where((s) => s.isNotEmpty).toList();
+    final key = '${activity['title']}_${activity['date']}';
+
+    return Scaffold(
+      backgroundColor: isDarkMode ? Colors.grey[900] : Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+        title: Text(activity['title'] ?? 'Activity', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // Header info
+          Row(children: [
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Posted: ${activity['date'] ?? ''}', style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+              if (hasDeadline) ...[
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isOverdue ? Colors.red.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: isOverdue ? Colors.red : Colors.orange),
+                  ),
+                  child: Text(isOverdue ? '⚠ Overdue: $deadline' : 'Due: $deadline',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: isOverdue ? Colors.red : Colors.orange)),
+                ),
+              ],
+            ])),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8), border: Border.all(color: statusColor.withOpacity(0.4))),
+              child: Text(studentStatus, style: TextStyle(fontWeight: FontWeight.w700, color: statusColor)),
+            ),
+          ]),
+          // Description
+          if ((activity['description'] ?? '').toString().isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Text('Description', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            const SizedBox(height: 8),
+            Text(activity['description'] ?? '', style: const TextStyle(fontSize: 14, height: 1.5)),
+          ],
+          // Images
+          if (imagePaths.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Text('Attachments', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            const SizedBox(height: 8),
+            ...imagePaths.map((path) {
+              final f = File(path);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: GestureDetector(
+                  onTap: () => _showImagePreview(context, imagePaths, imagePaths.indexOf(path)),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: f.existsSync()
+                        ? Image.file(f, width: double.infinity, fit: BoxFit.cover)
+                        : Container(height: 120, color: Colors.grey[200], child: const Center(child: Icon(Icons.broken_image, color: Colors.grey, size: 40))),
+                  ),
+                ),
+              );
+            }).toList(),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
+// ── Guardian Announcement Detail Page ────────────────────────────────────────
+class GuardianAnnouncementDetailPage extends StatelessWidget {
+  final Map<String, dynamic> announcement;
+  final bool isDarkMode;
+
+  const GuardianAnnouncementDetailPage({
+    super.key,
+    required this.announcement,
+    required this.isDarkMode,
+  });
+
+  void _showImagePreview(BuildContext ctx, List<String> paths, int initial) {
+    showDialog(
+      context: ctx,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(children: [
+          PageView.builder(
+            controller: PageController(initialPage: initial),
+            itemCount: paths.length,
+            itemBuilder: (_, i) {
+              final f = File(paths[i]);
+              return Center(
+                child: f.existsSync()
+                    ? InteractiveViewer(child: Image.file(f, fit: BoxFit.contain))
+                    : const Icon(Icons.broken_image, color: Colors.white, size: 64),
+              );
+            },
+          ),
+          Positioned(top: 12, right: 12,
+            child: GestureDetector(
+              onTap: () => Navigator.pop(ctx),
+              child: Container(padding: const EdgeInsets.all(6), decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle), child: const Icon(Icons.close, color: Colors.white, size: 20)),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final imagePaths = (announcement['imagePaths'] ?? '').toString().split('|').where((s) => s.isNotEmpty).toList();
+
+    return Scaffold(
+      backgroundColor: isDarkMode ? Colors.grey[900] : Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.orange,
+        foregroundColor: Colors.white,
+        title: Text(announcement['title'] ?? 'Announcement', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(announcement['date'] ?? '', style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+          if ((announcement['message'] ?? '').toString().isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text(announcement['message'] ?? '', style: const TextStyle(fontSize: 15, height: 1.6)),
+          ],
+          if (imagePaths.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Text('Attachments', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            const SizedBox(height: 8),
+            ...imagePaths.map((path) {
+              final f = File(path);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: GestureDetector(
+                  onTap: () => _showImagePreview(context, imagePaths, imagePaths.indexOf(path)),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: f.existsSync()
+                        ? Image.file(f, width: double.infinity, fit: BoxFit.cover)
+                        : Container(height: 120, color: Colors.grey[200], child: const Center(child: Icon(Icons.broken_image, color: Colors.grey, size: 40))),
+                  ),
+                ),
+              );
+            }).toList(),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+// ── Phone Number Formatter ────────────────────────────────────────────────
+// Formats input as: 9XX XXXX XXXX (prefix +63 shown separately)
+// Enforces starts with 9, max 11 digits total
+class PhoneNumberFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue old, TextEditingValue val) {
+    // Strip all non-digits
+    String digits = val.text.replaceAll(RegExp(r'[^\d]'), '');
+
+    // Always enforce starts with 9
+    if (digits.isEmpty) digits = '9';
+    if (!digits.startsWith('9')) digits = '9' + digits.replaceAll('9', '');
+
+    // Limit to 11 digits (9 + 10 more)
+    if (digits.length > 11) digits = digits.substring(0, 11);
+
+    // Format: 9XX XXXX XXXX
+    final buffer = StringBuffer();
+    for (int i = 0; i < digits.length; i++) {
+      if (i == 3 || i == 7) buffer.write(' ');
+      buffer.write(digits[i]);
+    }
+
+    final formatted = buffer.toString();
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
     );
   }
 }

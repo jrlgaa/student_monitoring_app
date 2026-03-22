@@ -60,10 +60,12 @@ class ActivityDatabase {
         fileName TEXT,
         filePath TEXT,
         date TEXT NOT NULL,
+        deadline TEXT DEFAULT '',
         roomCode TEXT DEFAULT ''
       )
     ''');
     try { await db.execute("ALTER TABLE activities ADD COLUMN roomCode TEXT DEFAULT ''"); } catch (_) {}
+    try { await db.execute("ALTER TABLE activities ADD COLUMN deadline TEXT DEFAULT ''"); } catch (_) {}
 
     // 3. Announcements table
     await db.execute('''
@@ -72,10 +74,12 @@ class ActivityDatabase {
         title TEXT NOT NULL,
         message TEXT,
         date TEXT NOT NULL,
+        imagePaths TEXT DEFAULT '',
         roomCode TEXT DEFAULT ''
       )
     ''');
     try { await db.execute("ALTER TABLE announcements ADD COLUMN roomCode TEXT DEFAULT ''"); } catch (_) {}
+    try { await db.execute("ALTER TABLE announcements ADD COLUMN imagePaths TEXT DEFAULT ''"); } catch (_) {}
 
     // 4. Student Grades table
     await db.execute('''
@@ -96,9 +100,11 @@ class ActivityDatabase {
         studentName TEXT NOT NULL,
         date TEXT NOT NULL,
         status TEXT NOT NULL,
-        UNIQUE(studentName, date) ON CONFLICT REPLACE
+        roomCode TEXT DEFAULT '',
+        UNIQUE(studentName, date, roomCode) ON CONFLICT REPLACE
       )
     ''');
+    try { await db.execute("ALTER TABLE attendance ADD COLUMN roomCode TEXT DEFAULT ''"); } catch (_) {}
 
     // 6. Rooms table
     await db.execute('''
@@ -129,12 +135,13 @@ class ActivityDatabase {
 
   // --- ATTENDANCE METHODS ---
 
-  Future<int> saveAttendance(String name, String date, String status) async {
+  Future<int> saveAttendance(String name, String date, String status, {String roomCode = ''}) async {
     final db = await instance.database;
     return await db.insert('attendance', {
       'studentName': name,
       'date': date,
       'status': status,
+      'roomCode': roomCode,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
@@ -152,6 +159,23 @@ class ActivityDatabase {
       for (var item in maps)
         item['studentName'] as String : item['status'] as String
     };
+  }
+
+  /// Returns all attendance records for a given student name, ordered by date DESC
+  Future<List<Map<String, dynamic>>> getAttendanceByStudent(String studentName) async {
+    final db = await instance.database;
+    return await db.query(
+      'attendance',
+      where: 'studentName = ?',
+      whereArgs: [studentName],
+      orderBy: 'date DESC',
+    );
+  }
+
+  /// Returns all attendance records (all students, all dates)
+  Future<List<Map<String, dynamic>>> getAllAttendance() async {
+    final db = await instance.database;
+    return await db.query('attendance', orderBy: 'date DESC');
   }
 
   // --- GRADE PERSISTENCE METHODS ---
@@ -284,7 +308,17 @@ class ActivityDatabase {
 
   Future<int> insertActivity(Map<String, dynamic> activity) async {
     final db = await instance.database;
-    return await db.insert('activities', activity);
+    // Only insert known columns — strip id and any extra fields
+    final row = {
+      'title': activity['title'] ?? '',
+      'description': activity['description'] ?? '',
+      'fileName': activity['fileName'] ?? '',
+      'filePath': activity['filePath'] ?? '',
+      'date': activity['date'] ?? '',
+      'deadline': activity['deadline'] ?? '',
+      'roomCode': activity['roomCode'] ?? '',
+    };
+    return await db.insert('activities', row);
   }
 
   Future<List<Map<String, dynamic>>> getActivities() async {
@@ -294,7 +328,15 @@ class ActivityDatabase {
 
   Future<int> insertAnnouncement(Map<String, dynamic> announcement) async {
     final db = await instance.database;
-    return await db.insert('announcements', announcement);
+    // Only insert known columns — strip id and any extra fields
+    final row = {
+      'title': announcement['title'] ?? '',
+      'message': announcement['message'] ?? '',
+      'date': announcement['date'] ?? '',
+      'imagePaths': announcement['imagePaths'] ?? '',
+      'roomCode': announcement['roomCode'] ?? '',
+    };
+    return await db.insert('announcements', row);
   }
 
   Future<List<Map<String, dynamic>>> getAnnouncements() async {
@@ -381,12 +423,7 @@ class ActivityDatabase {
     try {
       final db = await instance.database;
 
-      // Debug: show all rooms in DB
-      final allRooms = await db.query('rooms');
-      debugPrint('joinRoom DEBUG: all rooms in DB = $allRooms');
-      debugPrint('joinRoom DEBUG: looking for code = "${code.toUpperCase().trim()}"');
-
-      // Ensure rooms and room_members tables exist in this DB session
+      // Ensure tables exist FIRST before any queries
       await db.execute('''
         CREATE TABLE IF NOT EXISTS rooms (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -405,6 +442,11 @@ class ActivityDatabase {
           UNIQUE(roomCode, guardianEmail) ON CONFLICT IGNORE
         )
       ''');
+
+      // Debug: show all rooms in DB
+      final allRooms = await db.query('rooms');
+      debugPrint('joinRoom DEBUG: all rooms in DB = $allRooms');
+      debugPrint('joinRoom DEBUG: looking for code = "${code.toUpperCase().trim()}"');
 
       final room = await getRoomByCode(code);
       debugPrint('joinRoom: room found = ${room != null}');
@@ -425,8 +467,6 @@ class ActivityDatabase {
   Future<Map<String, dynamic>?> getJoinedRoom(String guardianEmail) async {
     try {
       final db = await instance.database;
-
-      // Ensure tables exist
       await db.execute('''
         CREATE TABLE IF NOT EXISTS rooms (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -445,7 +485,6 @@ class ActivityDatabase {
           UNIQUE(roomCode, guardianEmail) ON CONFLICT IGNORE
         )
       ''');
-
       final maps = await db.rawQuery('''
         SELECT r.* FROM rooms r
         JOIN room_members rm ON r.code = rm.roomCode
@@ -460,10 +499,30 @@ class ActivityDatabase {
     }
   }
 
-  Future<void> leaveRoom(String guardianEmail) async {
+  /// Returns ALL rooms this guardian has joined
+  Future<List<Map<String, dynamic>>> getJoinedRooms(String guardianEmail) async {
     try {
       final db = await instance.database;
-      await db.delete('room_members', where: 'guardianEmail = ?', whereArgs: [guardianEmail]);
+      final maps = await db.rawQuery('''
+        SELECT r.* FROM rooms r
+        JOIN room_members rm ON r.code = rm.roomCode
+        WHERE rm.guardianEmail = ?
+        ORDER BY rm.joinedAt DESC
+      ''', [guardianEmail]);
+      return maps;
+    } catch (e) {
+      debugPrint('getJoinedRooms error: $e');
+      return [];
+    }
+  }
+
+  /// Leave a specific room by code
+  Future<void> leaveRoomByCode(String code, String guardianEmail) async {
+    try {
+      final db = await instance.database;
+      await db.delete('room_members',
+          where: 'roomCode = ? AND guardianEmail = ?',
+          whereArgs: [code, guardianEmail]);
     } catch (_) {}
   }
 
@@ -498,6 +557,39 @@ class ActivityDatabase {
       }
       return result;
     } catch (_) {
+      return [];
+    }
+  }
+
+  /// Returns members of a SPECIFIC room by its code.
+  Future<List<Map<String, dynamic>>> getRoomMembersByCode(String roomCode) async {
+    try {
+      final db = await instance.database;
+      final members = await db.query('room_members', where: 'roomCode = ?', whereArgs: [roomCode.toUpperCase().trim()]);
+      if (members.isEmpty) return [];
+
+      final adminDbPath = join(await getDatabasesPath(), 'user_data.db');
+      final adminDb = await openDatabase(adminDbPath);
+
+      final List<Map<String, dynamic>> result = [];
+      for (final member in members) {
+        final email = member['guardianEmail'].toString();
+        final users = await adminDb.query('users', where: 'email = ?', whereArgs: [email], limit: 1);
+        if (users.isNotEmpty) {
+          final u = users.first;
+          final firstName = (u['firstName'] ?? '').toString().trim();
+          final middleName = (u['middleName'] ?? '').toString().trim();
+          final lastName = (u['lastName'] ?? '').toString().trim();
+          final fullName = [firstName, if (middleName.isNotEmpty) middleName, lastName]
+              .where((s) => s.isNotEmpty).join(' ');
+          result.add({'name': fullName, 'email': email});
+        } else {
+          result.add({'name': email, 'email': email});
+        }
+      }
+      return result;
+    } catch (e) {
+      debugPrint('getRoomMembersByCode error: $e');
       return [];
     }
   }

@@ -45,6 +45,8 @@ class _GuardianPageState extends State<GuardianPage> {
   Color get _fieldFill     => widget.isDarkMode ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9);
 
   late TextEditingController _lrnController;
+  late TextEditingController _studentNameController;
+  Map<String, dynamic>? _selectedStudentForRoom;
   List<Map<String, dynamic>> linkedStudents = [];
   bool isLinking = false;
   int? currentGuardianId;
@@ -90,8 +92,8 @@ class _GuardianPageState extends State<GuardianPage> {
 
   Map<String, Map<String, Map<String, dynamic>>> _studentGrades = {};
 
-  final List<String> menuTitles = ['Rooms', 'Student Grades', 'Attendance', 'Profile'];
-  final List<IconData> menuIcons = [Icons.meeting_room_outlined, Icons.school, Icons.calendar_today, Icons.person];
+  final List<String> menuTitles = ['Rooms', 'Student Grades', 'Attendance', '+ Students', 'Profile'];
+  final List<IconData> menuIcons = [Icons.meeting_room_outlined, Icons.school, Icons.calendar_today, Icons.person_add, Icons.person];
 
   @override
   void initState() {
@@ -101,6 +103,7 @@ class _GuardianPageState extends State<GuardianPage> {
     _lastNameController = TextEditingController();
     _phoneController = TextEditingController();
     _lrnController = TextEditingController();
+    _studentNameController = TextEditingController();
     _fetchDatabaseData();
   }
 
@@ -111,6 +114,7 @@ class _GuardianPageState extends State<GuardianPage> {
     _lastNameController.dispose();
     _phoneController.dispose();
     _lrnController.dispose();
+    _studentNameController.dispose();
     _roomCodeController.dispose();
     super.dispose();
   }
@@ -216,14 +220,6 @@ class _GuardianPageState extends State<GuardianPage> {
   void _initGuardianGrades(List<Map<String, dynamic>> allGrades) {
     _studentGrades = {};
 
-    // Guardian's own name — teacher keys grades by guardian's name (from room_members → users table)
-    final guardianName = _getFullName.trim();
-    // Capitalized version (teacher applies _capitalizeName)
-    final guardianNameCapitalized = guardianName.split(' ')
-        .where((w) => w.isNotEmpty)
-        .map((w) => w[0].toUpperCase() + w.substring(1).toLowerCase())
-        .join(' ');
-
     for (var studentMap in linkedStudents) {
       final fullName = _formatFullName(studentMap);
       final firstLast = '${studentMap['firstName'] ?? ''} ${studentMap['lastName'] ?? ''}'.trim();
@@ -231,16 +227,12 @@ class _GuardianPageState extends State<GuardianPage> {
 
       for (var activity in _activities) {
         final key = '${activity['title']}_${activity['date']}';
-        // Teacher keys grade by guardian's name (not student's name)
-        // Try: guardian name, guardian capitalized, student fullName, student firstLast
+        // Teacher now saves grade under student name — match by student name only
         final gradeRow = allGrades.where((g) {
           final sn = (g['studentName'] ?? '').toString().trim();
           final ak = (g['activityKey'] ?? '').toString();
           return ak == key && (
-              sn == guardianName ||
-                  sn == guardianNameCapitalized ||
-                  sn.toLowerCase() == guardianName.toLowerCase() ||
-                  sn == fullName ||
+              sn == fullName ||
                   sn == firstLast ||
                   sn.toLowerCase() == fullName.toLowerCase() ||
                   sn.toLowerCase() == firstLast.toLowerCase()
@@ -306,6 +298,11 @@ class _GuardianPageState extends State<GuardianPage> {
 
       setState(() {
         linkedStudents.removeWhere((s) => s['id'] == studentId);
+        // Reset selection if the removed student was selected
+        if (_selectedStudentForRoom != null &&
+            _formatFullName(_selectedStudentForRoom!) == fullName) {
+          _selectedStudentForRoom = null;
+        }
       });
 
       if (mounted) {
@@ -325,11 +322,15 @@ class _GuardianPageState extends State<GuardianPage> {
   Future<void> _linkStudent() async {
     final int guardianId = currentGuardianId ?? 1;
 
+    final nameStr = _studentNameController.text.trim();
     final lrnStr = _lrnController.text.trim();
+
+    if (nameStr.isEmpty) {
+      _showSnackbar('Please enter the student\'s full name', isError: true);
+      return;
+    }
     if (lrnStr.length != 12 || !RegExp(r'^\d{12}$').hasMatch(lrnStr)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter exactly 12 digits LRN'), backgroundColor: Colors.red),
-      );
+      _showSnackbar('LRN must be exactly 12 digits', isError: true);
       return;
     }
 
@@ -341,6 +342,7 @@ class _GuardianPageState extends State<GuardianPage> {
     try {
       final adminDb = await DatabaseHelper.instance.database;
 
+      // Ensure tables exist
       await adminDb.execute('''
         CREATE TABLE IF NOT EXISTS guardian_students (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -351,38 +353,50 @@ class _GuardianPageState extends State<GuardianPage> {
         )
       ''');
 
-      final List<Map<String, dynamic>> studentMaps = await adminDb.query(
-        'students',
-        where: 'lrn = ? AND status = ?',
-        whereArgs: [lrnInt, 'Active'],
-      );
+      // Parse name into parts
+      final nameParts = nameStr.split(' ').where((p) => p.isNotEmpty).toList();
+      final firstName = nameParts.isNotEmpty ? nameParts.first : nameStr;
+      final lastName = nameParts.length > 1 ? nameParts.last : '';
+      final middleName = nameParts.length > 2
+          ? nameParts.sublist(1, nameParts.length - 1).join(' ')
+          : '';
 
-      if (studentMaps.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Student not found'), backgroundColor: Colors.orange),
-        );
-        return;
+      // Check if student already exists by LRN
+      final existing = await adminDb.query('students', where: 'lrn = ?', whereArgs: [lrnInt], limit: 1);
+
+      int studentId;
+      Map<String, dynamic> student;
+
+      if (existing.isNotEmpty) {
+        // Student already in DB — use existing record
+        student = existing.first;
+        studentId = student['id'] as int;
+      } else {
+        // Student not in DB yet — create from guardian's input
+        studentId = await adminDb.insert('students', {
+          'firstName': firstName,
+          'middleName': middleName,
+          'lastName': lastName,
+          'lrn': lrnInt,
+          'grade': '',
+          'status': 'Active',
+        });
+        final inserted = await adminDb.query('students', where: 'id = ?', whereArgs: [studentId], limit: 1);
+        student = inserted.first;
       }
 
-      final student = studentMaps.first;
-      final studentId = student['id'] as int;
-
+      // Check already linked
       final count = Sqflite.firstIntValue(await adminDb.rawQuery(
         'SELECT COUNT(*) as count FROM guardian_students WHERE guardian_id = ? AND student_id = ?',
         [guardianId, studentId],
       )) ?? 0;
 
       if (count > 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Already linked'), backgroundColor: Colors.orange),
-        );
+        _showSnackbar('This student is already linked', isError: false);
         return;
       }
 
-      await adminDb.insert('guardian_students', {
-        'guardian_id': guardianId,
-        'student_id': studentId,
-      });
+      await adminDb.insert('guardian_students', {'guardian_id': guardianId, 'student_id': studentId});
 
       final links = await adminDb.rawQuery('''
         SELECT s.* FROM students s
@@ -391,8 +405,11 @@ class _GuardianPageState extends State<GuardianPage> {
         ORDER BY s.lastName
       ''', [guardianId]);
 
-      setState(() => linkedStudents = links);
+      setState(() {
+        linkedStudents = links;
+      });
 
+      _studentNameController.clear();
       _lrnController.clear();
       _showSnackbar('${_formatFullName(student)} linked!');
     } catch (e) {
@@ -552,16 +569,16 @@ class _GuardianPageState extends State<GuardianPage> {
                           Container(
                             width: 36, height: 36,
                             decoration: BoxDecoration(
-                              color: selected ? _primaryBlue.withOpacity(0.2) : Colors.white.withOpacity(0.05),
+                              color: selected ? _primaryBlue.withOpacity(0.25) : Colors.white.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Icon(menuIcons[index],
-                                color: selected ? const Color(0xFF60A5FA) : Colors.white.withOpacity(0.5), size: 18),
+                                color: selected ? const Color(0xFF60A5FA) : Colors.white.withOpacity(0.75), size: 18),
                           ),
                           const SizedBox(width: 12),
                           Text(menuTitles[index],
                               style: TextStyle(
-                                  color: selected ? const Color(0xFF60A5FA) : Colors.white.withOpacity(0.65),
+                                  color: selected ? const Color(0xFF60A5FA) : Colors.white.withOpacity(0.85),
                                   fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                                   fontSize: 14)),
                           if (selected) ...[
@@ -634,7 +651,8 @@ class _GuardianPageState extends State<GuardianPage> {
       case 0: return _roomsSection();
       case 1: return _studentGradesSection();
       case 2: return _attendanceSection();
-      case 3: return _genericSection('Profile', _profileContent());
+      case 3: return _studentsSection();
+      case 4: return _genericSection('Profile', _profileContent());
       default: return const SizedBox();
     }
   }
@@ -841,62 +859,9 @@ class _GuardianPageState extends State<GuardianPage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
               children: [
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(color: _cardColor, borderRadius: BorderRadius.circular(20), border: Border.all(color: _dividerColor)),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(children: [
-                      Container(width: 28, height: 28,
-                          decoration: BoxDecoration(color: _primaryBlue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                          child: Icon(Icons.add_rounded, color: _primaryBlue, size: 16)),
-                      const SizedBox(width: 8),
-                      Text('Join a Room', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.w600, fontSize: 14)),
-                    ]),
-                    const SizedBox(height: 14),
-                    Row(children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _roomCodeController,
-                          textCapitalization: TextCapitalization.characters,
-                          maxLength: 6,
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 6, color: _textPrimary),
-                          textAlign: TextAlign.center,
-                          decoration: InputDecoration(
-                            hintText: 'XXXXXX',
-                            hintStyle: TextStyle(color: _textSecondary, letterSpacing: 4, fontSize: 16),
-                            filled: true, fillColor: _fieldFill,
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _dividerColor)),
-                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _dividerColor)),
-                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: _primaryBlue, width: 1.5)),
-                            counterText: '',
-                            contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      GestureDetector(
-                        onTap: isLinking ? null : _joinRoom,
-                        child: Container(
-                          height: 52, padding: const EdgeInsets.symmetric(horizontal: 20),
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(colors: [_primaryBlue, _accentIndigo], begin: Alignment.topLeft, end: Alignment.bottomRight),
-                            borderRadius: BorderRadius.circular(14),
-                            boxShadow: [BoxShadow(color: _primaryBlue.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))],
-                          ),
-                          child: Center(
-                            child: isLinking
-                                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                : const Text('Join', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
-                          ),
-                        ),
-                      ),
-                    ]),
-                  ]),
-                ),
-                const SizedBox(height: 20),
                 if (_joinedRooms.isEmpty)
                   Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 32),
+                    padding: const EdgeInsets.symmetric(vertical: 48),
                     child: Column(children: [
                       Container(padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(color: _dividerColor.withOpacity(0.5), shape: BoxShape.circle),
@@ -904,7 +869,7 @@ class _GuardianPageState extends State<GuardianPage> {
                       const SizedBox(height: 12),
                       Text('No rooms joined yet', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.w600, fontSize: 15)),
                       const SizedBox(height: 4),
-                      Text('Enter a room code above to join.', style: TextStyle(color: _textSecondary, fontSize: 13)),
+                      Text('Link a student and join a room from "+ Students".', style: TextStyle(color: _textSecondary, fontSize: 13)),
                     ]),
                   )
                 else
@@ -932,19 +897,15 @@ class _GuardianPageState extends State<GuardianPage> {
                               const SizedBox(width: 13),
                               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                 Text(room['title'] ?? '', style: TextStyle(color: _textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
-                                const SizedBox(height: 3),
+                                const SizedBox(height: 2),
+                                if ((room['teacherName'] ?? '').toString().trim().isNotEmpty)
+                                  Text('Teacher: ${room['teacherName']}', style: TextStyle(color: _textSecondary, fontSize: 12, fontWeight: FontWeight.w500)),
+                                if ((room['studentName'] ?? '').toString().isNotEmpty)
+                                  Text('Student: ${room['studentName']}', style: TextStyle(color: _teal, fontSize: 12, fontWeight: FontWeight.w500)),
+                                const SizedBox(height: 2),
                                 Text('${roomActivities.length} activities  ·  ${roomAnnouncements.length} announcements',
                                     style: TextStyle(color: _textSecondary, fontSize: 12)),
                               ])),
-                              GestureDetector(
-                                onTap: () => _leaveSpecificRoom(room),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(color: _dangerRed.withOpacity(0.08), borderRadius: BorderRadius.circular(10), border: Border.all(color: _dangerRed.withOpacity(0.3))),
-                                  child: Text('Leave', style: TextStyle(color: _dangerRed, fontSize: 12, fontWeight: FontWeight.w600)),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
                               Icon(Icons.chevron_right_rounded, color: _textSecondary, size: 20),
                             ]),
                           ),
@@ -960,46 +921,45 @@ class _GuardianPageState extends State<GuardianPage> {
     );
   }
   Future<void> _joinRoom() async {
-    final code = _roomCodeController.text.trim().toUpperCase();
-    if (code.length != 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a 6-character room code'), backgroundColor: Colors.red),
-      );
+    if (_selectedStudentForRoom == null) {
+      _showSnackbar('Please select a student first', isError: true);
       return;
     }
-    // Check if already joined this room
-    if (_joinedRooms.any((r) => r['code'].toString() == code)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('You have already joined this room.'), backgroundColor: Colors.orange),
-      );
+    final code = _roomCodeController.text.trim().toUpperCase();
+    if (code.length != 6) {
+      _showSnackbar('Please enter a 6-character room code', isError: true);
+      return;
+    }
+    final studentName = _formatFullName(_selectedStudentForRoom!);
+    if (_joinedRooms.any((r) => r['code'].toString() == code && (r['studentName'] ?? '').toString() == studentName)) {
+      _showSnackbar('$studentName has already joined this room.', isError: false);
       return;
     }
     setState(() => isLinking = true);
     try {
-      final success = await ActivityDatabase.instance.joinRoom(code, widget.loggedInEmail);
+      final studentId = _selectedStudentForRoom!['id'] as int?;
+      final success = await ActivityDatabase.instance.joinRoom(
+        code, widget.loggedInEmail,
+        studentId: studentId,
+        studentName: studentName,
+      );
       if (success) {
         _roomCodeController.clear();
+        setState(() => _selectedStudentForRoom = null);
         await _fetchDatabaseData();
         if (mounted) {
           final joined = _joinedRooms.firstWhere((r) => r['code'] == code, orElse: () => {});
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Joined room: ${joined['title'] ?? code}'), backgroundColor: Colors.green),
-          );
+          _showSnackbar('Joined room: ${joined['title'] ?? code}');
         }
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Room not found. Check the code and try again.'), backgroundColor: Colors.orange, duration: Duration(seconds: 4)),
-          );
-        }
+        if (mounted) _showSnackbar('Room not found. Check the code and try again.', isError: true);
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+      if (mounted) _showSnackbar('Error: $e', isError: true);
     } finally {
       if (mounted) setState(() => isLinking = false);
     }
   }
-
   Future<void> _leaveSpecificRoom(Map<String, dynamic> room) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1022,20 +982,264 @@ class _GuardianPageState extends State<GuardianPage> {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Left the room.')));
   }
 
+  Widget _studentsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 58, 24, 8),
+          child: Text('+ Students', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: -0.5, color: _textPrimary)),
+        ),
+        Expanded(child: RefreshIndicator(
+          onRefresh: _fetchDatabaseData,
+          color: _primaryBlue,
+          child: StatefulBuilder(builder: (context, setLocal) => ListView(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+            children: [
+              const SizedBox(height: 8),
+
+              // ── Link a Student ─────────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(color: _cardColor, borderRadius: BorderRadius.circular(20), border: Border.all(color: _dividerColor)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Container(width: 28, height: 28,
+                        decoration: BoxDecoration(color: _primaryBlue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                        child: Icon(Icons.person_add_rounded, color: _primaryBlue, size: 16)),
+                    const SizedBox(width: 8),
+                    Text('Link a Student', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.w700, fontSize: 15)),
+                  ]),
+                  const SizedBox(height: 14),
+                  // Student Full Name
+                  Text('Student Full Name', style: TextStyle(color: _textSecondary, fontSize: 12, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _studentNameController,
+                    keyboardType: TextInputType.name,
+                    textCapitalization: TextCapitalization.words,
+                    style: TextStyle(color: _textPrimary),
+                    decoration: InputDecoration(
+                      hintText: 'e.g. Juan Dela Cruz',
+                      hintStyle: TextStyle(color: _textSecondary),
+                      filled: true, fillColor: _fieldFill,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _dividerColor)),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _dividerColor)),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: _primaryBlue, width: 1.5)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  // Student LRN
+                  Text('Student LRN (12 digits)', style: TextStyle(color: _textSecondary, fontSize: 12, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _lrnController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 12,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(12)],
+                    style: TextStyle(color: _textPrimary, fontWeight: FontWeight.w600, letterSpacing: 2),
+                    decoration: InputDecoration(
+                      hintText: '000000000000',
+                      hintStyle: TextStyle(color: _textSecondary, letterSpacing: 2),
+                      filled: true, fillColor: _fieldFill,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _dividerColor)),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _dividerColor)),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: _primaryBlue, width: 1.5)),
+                      counterText: '',
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: GestureDetector(
+                      onTap: isLinking ? null : _linkStudent,
+                      child: Container(
+                        height: 48,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(colors: isLinking ? [Colors.grey, Colors.grey] : [_primaryBlue, _accentIndigo], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Center(child: isLinking
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Text('Link Student', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14))),
+                      ),
+                    ),
+                  ),
+                ]),
+              ),
+
+              const SizedBox(height: 16),
+
+              // ── Join a Room ────────────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(color: _cardColor, borderRadius: BorderRadius.circular(20), border: Border.all(color: _dividerColor)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Container(width: 28, height: 28,
+                        decoration: BoxDecoration(color: _teal.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                        child: const Icon(Icons.meeting_room_rounded, color: _teal, size: 16)),
+                    const SizedBox(width: 8),
+                    Text('Join a Room', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.w700, fontSize: 15)),
+                  ]),
+                  const SizedBox(height: 14),
+
+                  if (linkedStudents.isEmpty) ...[
+                    // No students linked yet
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(color: Colors.orange.withOpacity(0.08), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.orange.withOpacity(0.3))),
+                      child: Row(children: [
+                        const Icon(Icons.info_outline_rounded, color: Colors.orange, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text('Link a student first before joining a room.', style: TextStyle(color: Colors.orange.shade700, fontSize: 12))),
+                      ]),
+                    ),
+                  ] else ...[
+                    // Student selector
+                    Text('Select Student', style: TextStyle(color: _textSecondary, fontSize: 12, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _fieldFill,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: _dividerColor),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: _selectedStudentForRoom != null && linkedStudents.any((s) => _formatFullName(s) == _formatFullName(_selectedStudentForRoom!)) ? _formatFullName(_selectedStudentForRoom!) : null,
+                          isExpanded: true,
+                          dropdownColor: _cardColor,
+                          style: TextStyle(color: _textPrimary, fontWeight: FontWeight.w600, fontSize: 14),
+                          hint: Text('Choose a Student...', style: TextStyle(color: _textSecondary)),
+                          items: linkedStudents.map((s) {
+                            final name = _formatFullName(s);
+                            final lrn = (s['lrn'] ?? 0) != 0 ? _formatLRN(s['lrn'] as int) : '';
+                            return DropdownMenuItem<String>(
+                              value: name,
+                              child: Text('$name${lrn.isNotEmpty ? '  ·  $lrn' : ''}', style: TextStyle(color: _textPrimary, fontSize: 13)),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            final found = linkedStudents.firstWhere((s) => _formatFullName(s) == val, orElse: () => {});
+                            if (found.isNotEmpty) {
+                              setState(() => _selectedStudentForRoom = Map<String, dynamic>.from(found));
+                              setLocal(() {});
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    // Room code
+                    Text('Room Code', style: TextStyle(color: _textSecondary, fontSize: 12, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 6),
+                    Row(children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _roomCodeController,
+                          textCapitalization: TextCapitalization.characters,
+                          maxLength: 6,
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 6, color: _textPrimary),
+                          textAlign: TextAlign.center,
+                          decoration: InputDecoration(
+                            hintText: 'XXXXXX',
+                            hintStyle: TextStyle(color: _textSecondary, letterSpacing: 4, fontSize: 16),
+                            filled: true, fillColor: _fieldFill,
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _dividerColor)),
+                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _dividerColor)),
+                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: _teal, width: 1.5)),
+                            counterText: '',
+                            contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      GestureDetector(
+                        onTap: (isLinking || _selectedStudentForRoom == null) ? null : _joinRoom,
+                        child: Container(
+                          height: 52, padding: const EdgeInsets.symmetric(horizontal: 20),
+                          decoration: BoxDecoration(
+                            color: _selectedStudentForRoom == null ? Colors.grey : _teal,
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: _selectedStudentForRoom != null ? [BoxShadow(color: _teal.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))] : null,
+                          ),
+                          child: Center(child: isLinking
+                              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              : const Text('Join', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14))),
+                        ),
+                      ),
+                    ]),
+                  ],
+                ]),
+              ),
+
+              const SizedBox(height: 20),
+
+              // ── Linked Students list ───────────────────────────────────
+              if (linkedStudents.isNotEmpty) ...[
+                Text('Linked Students', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.w700, fontSize: 15)),
+                const SizedBox(height: 10),
+                ...linkedStudents.map((student) {
+                  final name = _formatFullName(student);
+                  final lrn = (student['lrn'] ?? 0) != 0 ? _formatLRN(student['lrn'] as int) : '—';
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    decoration: BoxDecoration(color: _cardColor, borderRadius: BorderRadius.circular(16), border: Border.all(color: _dividerColor)),
+                    child: Row(children: [
+                      Container(width: 40, height: 40,
+                          decoration: BoxDecoration(color: _primaryBlue.withOpacity(0.1), shape: BoxShape.circle),
+                          child: Center(child: Text(name[0].toUpperCase(), style: TextStyle(color: _primaryBlue, fontWeight: FontWeight.bold, fontSize: 16)))),
+                      const SizedBox(width: 12),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(name, style: TextStyle(color: _textPrimary, fontWeight: FontWeight.w600, fontSize: 14)),
+                        Text('LRN: $lrn', style: TextStyle(color: _textSecondary, fontSize: 12)),
+                      ])),
+                      GestureDetector(
+                        onTap: () => _unlinkStudent(student),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(color: _dangerRed.withOpacity(0.08), borderRadius: BorderRadius.circular(10), border: Border.all(color: _dangerRed.withOpacity(0.3))),
+                          child: Text('Remove', style: TextStyle(color: _dangerRed, fontSize: 12, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                    ]),
+                  );
+                }).toList(),
+              ],
+            ],
+          )),
+        )),
+      ],
+    );
+  }
+
   Widget _attendanceSection() {
     if (_joinedRooms.isEmpty) return _genericSection('Attendance', _noRoomJoinedWall());
-
-    final guardianName = _getFullName.trim();
-    final guardianNameCap = guardianName.split(' ')
-        .where((w) => w.isNotEmpty)
-        .map((w) => w[0].toUpperCase() + w.substring(1).toLowerCase())
-        .join(' ');
+    if (linkedStudents.isEmpty) return _genericSection('Attendance', Center(
+      child: Padding(padding: const EdgeInsets.all(32), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(Icons.person_outline, size: 64, color: Colors.grey[300]),
+        const SizedBox(height: 16),
+        Text('No linked students yet.', style: TextStyle(color: Colors.grey[500], fontSize: 16)),
+        const SizedBox(height: 8),
+        Text('Go to "+ Students" to link your student.', style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+      ])),
+    ));
 
     // All records matching this guardian
+    // Match attendance by any linked student's name (teacher now grades/marks by student name)
     final allRecords = _allAttendance.where((r) {
-      final sn = (r['studentName'] ?? '').toString().trim();
-      return sn == guardianName || sn == guardianNameCap ||
-          sn.toLowerCase() == guardianName.toLowerCase();
+      final sn = (r['studentName'] ?? '').toString().trim().toLowerCase();
+      // Check against each linked student's name
+      return linkedStudents.any((student) {
+        final fullName = _formatFullName(student).toLowerCase();
+        final firstLast = '${student['firstName'] ?? ''} ${student['lastName'] ?? ''}'.trim().toLowerCase();
+        return sn == fullName || sn == firstLast;
+      });
     }).toList();
 
     // Overall counts across all rooms

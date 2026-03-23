@@ -1546,7 +1546,7 @@ class _TeacherPageState extends State<TeacherPage> with SingleTickerProviderStat
     for (int i = 0; i < roomStudents.length; i++) {
       final name = roomStudents[i];
       final status = _currentAttendance[i] ?? 'Pending';
-      await ActivityDatabase.instance.saveAttendance(name, dateKey, status);
+      await ActivityDatabase.instance.saveAttendance(name, dateKey, status, roomCode: selectedCode);
     }
     // Cache with room+date key so switching rooms doesn't lose data
     setState(() {
@@ -2791,7 +2791,7 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
                                     suffixText: '/ 100',
                                     border: const OutlineInputBorder(),
                                     helperText: status == 'Pending'
-                                        ? '⚠ Set to Completed or Late to grade'
+                                        ? ' Set status to grade the activity.'
                                         : hasGrade ? 'Percentage: $pct' : 'Enter score (0–100)',
                                     helperStyle: TextStyle(
                                       color: status == 'Pending' ? Colors.grey[500] : Colors.grey[600],

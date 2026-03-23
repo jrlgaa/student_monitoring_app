@@ -29,7 +29,7 @@ class _SignUpPageState extends State<SignUpPage> with SingleTickerProviderStateM
 
   // ── Server URL ── change to your server's IP when running on a real device
   // e.g. 'http://192.168.1.10:8080' if server and phone are on the same Wi-Fi
-  static const String _serverUrl = 'http://192.168.1.35:8080';
+  static const String _serverUrl = 'http://10.30.97.249:8080';
 
   final TextEditingController firstNameController    = TextEditingController();
   final TextEditingController middleNameController   = TextEditingController();

@@ -425,7 +425,7 @@ class ActivityDatabase {
     }
   }
 
-  Future<bool> joinRoom(String code, String guardianEmail) async {
+  Future<bool> joinRoom(String code, String guardianEmail, {int? studentId, String studentName = ''}) async {
     try {
       final db = await instance.database;
 
@@ -444,10 +444,15 @@ class ActivityDatabase {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           roomCode TEXT NOT NULL,
           guardianEmail TEXT NOT NULL,
+          studentId INTEGER,
+          studentName TEXT DEFAULT '',
           joinedAt TEXT DEFAULT (datetime('now')),
-          UNIQUE(roomCode, guardianEmail) ON CONFLICT IGNORE
+          UNIQUE(roomCode, guardianEmail, studentId) ON CONFLICT IGNORE
         )
       ''');
+      // Migrate existing table if columns missing
+      try { await db.execute("ALTER TABLE room_members ADD COLUMN studentId INTEGER"); } catch (_) {}
+      try { await db.execute("ALTER TABLE room_members ADD COLUMN studentName TEXT DEFAULT ''"); } catch (_) {}
 
       // Debug: show all rooms in DB
       final allRooms = await db.query('rooms');
@@ -458,11 +463,16 @@ class ActivityDatabase {
       debugPrint('joinRoom: room found = ${room != null}');
       if (room == null) return false;
 
+      // Remove any old rows for this guardian+room without a specific student
+      await db.delete('room_members', where: 'roomCode = ? AND guardianEmail = ? AND (studentName IS NULL OR studentName = \'\')', whereArgs: [code.toUpperCase().trim(), guardianEmail]);
+
       await db.insert('room_members', {
         'roomCode': code.toUpperCase().trim(),
         'guardianEmail': guardianEmail,
-      }, conflictAlgorithm: ConflictAlgorithm.ignore);
-      debugPrint('joinRoom: inserted member $guardianEmail into room $code');
+        'studentId': studentId,
+        'studentName': studentName,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      debugPrint('joinRoom: inserted member $guardianEmail (student: $studentName) into room $code');
       return true;
     } catch (e) {
       debugPrint('joinRoom error: $e');
@@ -510,9 +520,14 @@ class ActivityDatabase {
     try {
       final db = await instance.database;
       final maps = await db.rawQuery('''
-        SELECT r.* FROM rooms r
+        SELECT r.*, rm.studentName, rm.studentId,
+               u.firstName || ' ' || u.lastName AS teacherName
+        FROM rooms r
         JOIN room_members rm ON r.code = rm.roomCode
+        LEFT JOIN users u ON u.email = r.teacherEmail
         WHERE rm.guardianEmail = ?
+          AND rm.studentName IS NOT NULL
+          AND rm.studentName != ''
         ORDER BY rm.joinedAt DESC
       ''', [guardianEmail]);
       return maps;
@@ -599,34 +614,34 @@ class ActivityDatabase {
     } catch (_) {}
   }
 
-  /// Returns members of a specific room by code (for admin detail view)
+  /// Returns members of a specific room by code — uses the student who specifically joined this room
   Future<List<Map<String, dynamic>>> getRoomMembersByCode(String code) async {
     try {
       final db = await instance.database;
+      // Ensure migration columns exist
+      try { await db.execute("ALTER TABLE room_members ADD COLUMN studentId INTEGER"); } catch (_) {}
+      try { await db.execute("ALTER TABLE room_members ADD COLUMN studentName TEXT DEFAULT ''"); } catch (_) {}
+
       final members = await db.query('room_members', where: 'roomCode = ?', whereArgs: [code.toUpperCase().trim()]);
       if (members.isEmpty) return [];
-
-      final adminDbPath = join(await getDatabasesPath(), 'user_data.db');
-      final adminDb = await openDatabase(adminDbPath);
 
       final List<Map<String, dynamic>> result = [];
       for (final member in members) {
         final email = member['guardianEmail'].toString();
-        final users = await adminDb.query('users', where: 'email = ?', whereArgs: [email], limit: 1);
-        if (users.isNotEmpty) {
-          final u = users.first;
-          final firstName = (u['firstName'] ?? '').toString().trim();
-          final middleName = (u['middleName'] ?? '').toString().trim();
-          final lastName = (u['lastName'] ?? '').toString().trim();
-          final fullName = [firstName, if (middleName.isNotEmpty) middleName, lastName]
-              .where((s) => s.isNotEmpty).join(' ');
-          result.add({'name': fullName, 'email': email});
-        } else {
-          result.add({'name': email, 'email': email});
+        final storedName = (member['studentName'] ?? '').toString().trim();
+        final storedId = member['studentId'];
+
+        if (storedName.isNotEmpty) {
+          // Use the student who specifically joined this room
+          result.add({'name': storedName, 'email': email, 'lrn': storedId});
         }
+        // Skip legacy records without studentName — they should be cleaned up on next join
       }
       return result;
-    } catch (_) { return []; }
+    } catch (e) {
+      debugPrint('getRoomMembersByCode error: $e');
+      return [];
+    }
   }
 
   Future<void> deleteRoom(String teacherEmail) async {

@@ -1,7 +1,5 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 import 'package:project/database/admin_db.dart';
 
 class SignUpPage extends StatefulWidget {
@@ -21,22 +19,11 @@ class _SignUpPageState extends State<SignUpPage> with SingleTickerProviderStateM
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
 
-  // Verification state
-  bool _isSendingCode    = false;
-  bool _codeSent         = false;
-  bool _codeVerified     = false;
-  int  _resendCountdown  = 0;
-
-  // ── Server URL ── change to your server's IP when running on a real device
-  // e.g. 'http://192.168.1.10:8080' if server and phone are on the same Wi-Fi
-  static const String _serverUrl = 'http://10.30.97.249:8080';
-
-  final TextEditingController firstNameController    = TextEditingController();
-  final TextEditingController middleNameController   = TextEditingController();
-  final TextEditingController lastNameController     = TextEditingController();
-  final TextEditingController emailLocalController   = TextEditingController();
-  final TextEditingController verificationController = TextEditingController();
-  final TextEditingController passwordController     = TextEditingController();
+  final TextEditingController firstNameController       = TextEditingController();
+  final TextEditingController middleNameController      = TextEditingController();
+  final TextEditingController lastNameController        = TextEditingController();
+  final TextEditingController emailLocalController      = TextEditingController();
+  final TextEditingController passwordController        = TextEditingController();
   final TextEditingController confirmPasswordController = TextEditingController();
 
   late AnimationController _animController;
@@ -72,7 +59,6 @@ class _SignUpPageState extends State<SignUpPage> with SingleTickerProviderStateM
     middleNameController.dispose();
     lastNameController.dispose();
     emailLocalController.dispose();
-    verificationController.dispose();
     passwordController.dispose();
     confirmPasswordController.dispose();
     _animController.dispose();
@@ -122,95 +108,14 @@ class _SignUpPageState extends State<SignUpPage> with SingleTickerProviderStateM
     );
   }
 
-  void _startResendTimer() {
-    setState(() => _resendCountdown = 60);
-    Future.doWhile(() async {
-      await Future.delayed(const Duration(seconds: 1));
-      if (!mounted) return false;
-      setState(() => _resendCountdown--);
-      return _resendCountdown > 0;
-    });
-  }
-
-  Future<void> _sendVerificationCode() async {
-    final String localPart = emailLocalController.text.trim();
-    if (localPart.isEmpty) {
-      _showSnackBar('Please enter your email username first', isError: true);
-      return;
-    }
-    final String domain = role == 'Teacher' ? '@deped.gov.ph' : '@gmail.com';
-    final String email  = '$localPart$domain';
-
-    setState(() => _isSendingCode = true);
-    try {
-      final response = await http.post(
-        Uri.parse('$_serverUrl/send-code'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email}),
-      ).timeout(const Duration(seconds: 15));
-
-      final Map<String, dynamic> result = jsonDecode(response.body);
-      if (result['success'] == true) {
-        setState(() {
-          _codeSent      = true;
-          _codeVerified  = false;
-        });
-        _startResendTimer();
-        _showSnackBar('Code sent to $email', isError: false);
-      } else {
-        _showSnackBar(result['message'] ?? 'Failed to send code', isError: true);
-      }
-    } catch (e) {
-      _showSnackBar('Cannot reach server. Check your connection.', isError: true);
-    } finally {
-      if (mounted) setState(() => _isSendingCode = false);
-    }
-  }
-
-  Future<void> _verifyCode() async {
-    final String localPart = emailLocalController.text.trim();
-    final String domain    = role == 'Teacher' ? '@deped.gov.ph' : '@gmail.com';
-    final String email     = '$localPart$domain';
-    final String code      = verificationController.text.trim();
-
-    if (code.length != 6) {
-      _showSnackBar('Please enter the 6-digit code', isError: true);
-      return;
-    }
-
-    setState(() => _isSendingCode = true);
-    try {
-      final response = await http.post(
-        Uri.parse('$_serverUrl/verify-code'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email, 'code': code}),
-      ).timeout(const Duration(seconds: 15));
-
-      final Map<String, dynamic> result = jsonDecode(response.body);
-      if (result['success'] == true) {
-        setState(() => _codeVerified = true);
-        _showSnackBar('Email verified!', isError: false);
-      } else {
-        _showSnackBar(result['message'] ?? 'Incorrect code', isError: true);
-      }
-    } catch (e) {
-      _showSnackBar('Cannot reach server. Check your connection.', isError: true);
-    } finally {
-      if (mounted) setState(() => _isSendingCode = false);
-    }
-  }
-
   Future<void> _handleSignUp() async {
     final String localPart = emailLocalController.text.trim();
-    final String domain = role == 'Teacher' ? '@deped.gov.ph' : '@gmail.com';
-    final String email = localPart.isNotEmpty ? '$localPart$domain' : '';
+    final String domain    = role == 'Teacher' ? '@deped.gov.ph' : '@gmail.com';
+    final String email     = localPart.isNotEmpty ? '$localPart$domain' : '';
 
-    if (firstNameController.text.isEmpty || lastNameController.text.isEmpty || localPart.isEmpty || passwordController.text.isEmpty) {
+    if (firstNameController.text.isEmpty || lastNameController.text.isEmpty ||
+        localPart.isEmpty || passwordController.text.isEmpty) {
       _showSnackBar('Please fill in all required fields', isError: true);
-      return;
-    }
-    if (!_codeVerified) {
-      _showSnackBar('Please verify your email first', isError: true);
       return;
     }
     if (passwordController.text != confirmPasswordController.text) {
@@ -265,9 +170,8 @@ class _SignUpPageState extends State<SignUpPage> with SingleTickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
-    // Email suffix based on role
-    final String emailSuffix = role == 'Teacher' ? '@deped.gov.ph' : '@gmail.com';
-    final Color emailSuffixColor = role == 'Teacher' ? _primaryBlue : _successGreen;
+    final String emailSuffix      = role == 'Teacher' ? '@deped.gov.ph' : '@gmail.com';
+    final Color  emailSuffixColor = role == 'Teacher' ? _primaryBlue : _successGreen;
 
     return Scaffold(
       backgroundColor: _surfaceColor,
@@ -285,8 +189,7 @@ class _SignUpPageState extends State<SignUpPage> with SingleTickerProviderStateM
                   GestureDetector(
                     onTap: () => Navigator.pop(context),
                     child: Container(
-                      width: 40,
-                      height: 40,
+                      width: 40, height: 40,
                       decoration: BoxDecoration(
                         color: _cardColor,
                         borderRadius: BorderRadius.circular(12),
@@ -300,18 +203,10 @@ class _SignUpPageState extends State<SignUpPage> with SingleTickerProviderStateM
                   // Header
                   Text(
                     'Create Account',
-                    style: TextStyle(
-                      color: _textPrimary,
-                      fontSize: 26,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: -0.5,
-                    ),
+                    style: TextStyle(color: _textPrimary, fontSize: 26, fontWeight: FontWeight.bold, letterSpacing: -0.5),
                   ),
                   const SizedBox(height: 6),
-                  Text(
-                    'Fill in the details below to get started',
-                    style: TextStyle(color: _textSecondary, fontSize: 14),
-                  ),
+                  Text('Fill in the details below to get started', style: TextStyle(color: _textSecondary, fontSize: 14)),
                   const SizedBox(height: 28),
 
                   // Role selector
@@ -375,7 +270,7 @@ class _SignUpPageState extends State<SignUpPage> with SingleTickerProviderStateM
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Name section header
+                        // Personal Info section
                         Row(
                           children: [
                             Container(
@@ -419,7 +314,7 @@ class _SignUpPageState extends State<SignUpPage> with SingleTickerProviderStateM
                         Divider(color: _dividerColor, height: 1),
                         const SizedBox(height: 20),
 
-                        // Account section
+                        // Account Details section
                         Row(
                           children: [
                             Container(
@@ -438,7 +333,6 @@ class _SignUpPageState extends State<SignUpPage> with SingleTickerProviderStateM
                           controller: emailLocalController,
                           style: TextStyle(color: _textPrimary, fontSize: 14),
                           keyboardType: TextInputType.emailAddress,
-                          // Block @ and spaces — domain is appended automatically
                           inputFormatters: [FilteringTextInputFormatter.deny(RegExp(r'[@\s]'))],
                           decoration: _inputDecoration(
                             'username',
@@ -447,122 +341,6 @@ class _SignUpPageState extends State<SignUpPage> with SingleTickerProviderStateM
                             suffixStyle: TextStyle(color: emailSuffixColor, fontWeight: FontWeight.w600, fontSize: 13),
                           ),
                         ),
-
-                        const SizedBox(height: 14),
-
-                        // Verification code row
-                        _label('Verification Code'),
-                        Row(
-                          children: [
-                            Expanded(
-                              flex: 2,
-                              child: TextField(
-                                controller: verificationController,
-                                style: TextStyle(color: _textPrimary, fontSize: 14),
-                                keyboardType: TextInputType.number,
-                                maxLength: 6,
-                                enabled: _codeSent && !_codeVerified,
-                                decoration: _inputDecoration(
-                                  'Enter 6-digit code',
-                                  Icons.verified_user_outlined,
-                                  suffixIcon: _codeVerified
-                                      ? Icon(Icons.check_circle_rounded, color: _successGreen, size: 20)
-                                      : null,
-                                ).copyWith(counterText: ''),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            // Send / Resend button
-                            if (!_codeSent || _resendCountdown == 0)
-                              GestureDetector(
-                                onTap: _isSendingCode ? null : _sendVerificationCode,
-                                child: Container(
-                                  height: 52,
-                                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                                  decoration: BoxDecoration(
-                                    color: _primaryBlue.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(color: _primaryBlue.withOpacity(0.3)),
-                                  ),
-                                  child: Center(
-                                    child: _isSendingCode
-                                        ? SizedBox(
-                                      width: 18, height: 18,
-                                      child: CircularProgressIndicator(strokeWidth: 2, color: _primaryBlue),
-                                    )
-                                        : Text(
-                                      _codeSent ? 'Resend' : 'Get Code',
-                                      style: TextStyle(color: _primaryBlue, fontWeight: FontWeight.w600, fontSize: 13),
-                                    ),
-                                  ),
-                                ),
-                              )
-                            else
-                              Container(
-                                height: 52,
-                                padding: const EdgeInsets.symmetric(horizontal: 14),
-                                decoration: BoxDecoration(
-                                  color: _dividerColor,
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    '${_resendCountdown}s',
-                                    style: TextStyle(color: _textSecondary, fontWeight: FontWeight.w600, fontSize: 13),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                        // Verify button — shown after code is sent and not yet verified
-                        if (_codeSent && !_codeVerified) ...[
-                          const SizedBox(height: 10),
-                          GestureDetector(
-                            onTap: _isSendingCode ? null : _verifyCode,
-                            child: Container(
-                              width: double.infinity,
-                              height: 46,
-                              decoration: BoxDecoration(
-                                color: _successGreen.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: _successGreen.withOpacity(0.3)),
-                              ),
-                              child: Center(
-                                child: _isSendingCode
-                                    ? SizedBox(
-                                  width: 18, height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: _successGreen),
-                                )
-                                    : Text(
-                                  'Verify Code',
-                                  style: TextStyle(color: _successGreen, fontWeight: FontWeight.w600, fontSize: 14),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                        // Verified badge
-                        if (_codeVerified) ...[
-                          const SizedBox(height: 10),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            decoration: BoxDecoration(
-                              color: _successGreen.withOpacity(0.08),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: _successGreen.withOpacity(0.25)),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.check_circle_rounded, color: _successGreen, size: 16),
-                                const SizedBox(width: 6),
-                                Text('Email verified', style: TextStyle(color: _successGreen, fontWeight: FontWeight.w600, fontSize: 13)),
-                              ],
-                            ),
-                          ),
-                        ],
-
                         const SizedBox(height: 14),
 
                         _label('Password'),

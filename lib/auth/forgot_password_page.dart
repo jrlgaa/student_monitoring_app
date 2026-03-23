@@ -1,9 +1,6 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
-import 'package:http/http.dart' as http;
 
 class ForgotPasswordPage extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -16,29 +13,21 @@ class ForgotPasswordPage extends StatefulWidget {
 }
 
 class _ForgotPasswordPageState extends State<ForgotPasswordPage> with SingleTickerProviderStateMixin {
-  final TextEditingController emailController        = TextEditingController();
-  final TextEditingController codeController         = TextEditingController();
-  final TextEditingController newPasswordController  = TextEditingController();
+  final TextEditingController emailController           = TextEditingController();
+  final TextEditingController newPasswordController     = TextEditingController();
   final TextEditingController confirmPasswordController = TextEditingController();
 
-  // 0 = email step, 1 = code verification step, 2 = reset password step
+  // 0 = email step, 1 = reset password step
   int _step = 0;
   int? _userId;
 
-  bool _isLoading       = false;
-  bool _isSendingCode   = false;
-  bool _codeVerified    = false;
-  int  _resendCountdown = 0;
-
+  bool _isLoading              = false;
   bool _obscureNewPassword     = true;
   bool _obscureConfirmPassword = true;
 
   late AnimationController _animController;
   late Animation<double>   _fadeAnim;
   late Animation<Offset>   _slideAnim;
-
-  // ── Same server URL as signup_page ───────────────────────────────────────
-  static const String _serverUrl = 'http://192.168.1.35:8080';
 
   // ── Design tokens ────────────────────────────────────────────────────────
   static const Color _primaryBlue  = Color(0xFF2563EB);
@@ -66,7 +55,6 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> with SingleTick
   @override
   void dispose() {
     emailController.dispose();
-    codeController.dispose();
     newPasswordController.dispose();
     confirmPasswordController.dispose();
     _animController.dispose();
@@ -83,19 +71,17 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> with SingleTick
 
     setState(() => _isLoading = true);
     try {
-      final dbPath = await getDatabasesPath();
-      final path   = p.join(dbPath, 'user_data.db');
-      final db     = await openDatabase(path);
+      final dbPath  = await getDatabasesPath();
+      final path    = p.join(dbPath, 'user_data.db');
+      final db      = await openDatabase(path);
       final results = await db.query('users',
           where: 'email = ? AND status = ?', whereArgs: [email, 'Active']);
 
       if (results.isNotEmpty) {
         setState(() {
           _userId = results[0]['id'] as int;
+          _step   = 1;
         });
-        // Auto-send code after email is found
-        await _sendVerificationCode();
-        setState(() => _step = 1);
         _animController.forward(from: 0.0);
       } else {
         _showSnackBar('Email not found or account inactive', isError: true);
@@ -107,78 +93,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> with SingleTick
     }
   }
 
-  // ── STEP 2a: send code via email server ───────────────────────────────────
-  Future<void> _sendVerificationCode() async {
-    final email = emailController.text.trim();
-    setState(() => _isSendingCode = true);
-    try {
-      final response = await http.post(
-        Uri.parse('$_serverUrl/send-code'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email}),
-      ).timeout(const Duration(seconds: 15));
-
-      final result = jsonDecode(response.body);
-      if (result['success'] == true) {
-        _startResendTimer();
-        _showSnackBar('Code sent to $email', isError: false);
-      } else {
-        _showSnackBar(result['message'] ?? 'Failed to send code', isError: true);
-      }
-    } catch (e) {
-      _showSnackBar('Cannot reach server. Check your connection.', isError: true);
-    } finally {
-      if (mounted) setState(() => _isSendingCode = false);
-    }
-  }
-
-  void _startResendTimer() {
-    setState(() => _resendCountdown = 60);
-    Future.doWhile(() async {
-      await Future.delayed(const Duration(seconds: 1));
-      if (!mounted) return false;
-      setState(() => _resendCountdown--);
-      return _resendCountdown > 0;
-    });
-  }
-
-  // ── STEP 2b: verify code ─────────────────────────────────────────────────
-  Future<void> _verifyCode() async {
-    final email = emailController.text.trim();
-    final code  = codeController.text.trim();
-
-    if (code.length != 6) {
-      _showSnackBar('Please enter the 6-digit code', isError: true);
-      return;
-    }
-
-    setState(() => _isSendingCode = true);
-    try {
-      final response = await http.post(
-        Uri.parse('$_serverUrl/verify-code'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email, 'code': code}),
-      ).timeout(const Duration(seconds: 15));
-
-      final result = jsonDecode(response.body);
-      if (result['success'] == true) {
-        setState(() {
-          _codeVerified = true;
-          _step = 2;
-        });
-        _animController.forward(from: 0.0);
-        _showSnackBar('Code verified! Set your new password.', isError: false);
-      } else {
-        _showSnackBar(result['message'] ?? 'Incorrect code', isError: true);
-      }
-    } catch (e) {
-      _showSnackBar('Cannot reach server. Check your connection.', isError: true);
-    } finally {
-      if (mounted) setState(() => _isSendingCode = false);
-    }
-  }
-
-  // ── STEP 3: reset password ───────────────────────────────────────────────
+  // ── STEP 2: reset password ───────────────────────────────────────────────
   Future<void> _resetPassword() async {
     final newPass     = newPasswordController.text.trim();
     final confirmPass = confirmPasswordController.text.trim();
@@ -261,29 +176,12 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> with SingleTick
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-  String get _stepTitle {
-    if (_step == 0) return 'Forgot Password';
-    if (_step == 1) return 'Verify Your Email';
-    return 'Set New Password';
-  }
-
-  String get _stepSubtitle {
-    if (_step == 0) return 'Enter your registered email to continue';
-    if (_step == 1) return 'Enter the 6-digit code sent to your email';
-    return 'Choose a strong password (min. 6 characters)';
-  }
-
-  IconData get _stepIcon {
-    if (_step == 0) return Icons.lock_reset_rounded;
-    if (_step == 1) return Icons.mark_email_read_rounded;
-    return Icons.lock_open_rounded;
-  }
-
-  Color get _stepColor {
-    if (_step == 0) return _primaryBlue;
-    if (_step == 1) return _accentIndigo;
-    return _successGreen;
-  }
+  String get _stepTitle    => _step == 0 ? 'Forgot Password' : 'Set New Password';
+  String get _stepSubtitle => _step == 0
+      ? 'Enter your registered email to continue'
+      : 'Choose a strong password (min. 6 characters)';
+  IconData get _stepIcon   => _step == 0 ? Icons.lock_reset_rounded : Icons.lock_open_rounded;
+  Color get _stepColor     => _step == 0 ? _primaryBlue : _successGreen;
 
   @override
   Widget build(BuildContext context) {
@@ -306,10 +204,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> with SingleTick
                         if (_step == 0) {
                           Navigator.pop(context);
                         } else {
-                          setState(() {
-                            _step--;
-                            if (_step == 0) { _codeVerified = false; codeController.clear(); }
-                          });
+                          setState(() => _step = 0);
                           _animController.forward(from: 0.0);
                         }
                       },
@@ -349,19 +244,15 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> with SingleTick
 
                     const SizedBox(height: 28),
 
-                    // Step progress bar (3 steps)
+                    // Step progress bar (2 steps)
                     Row(children: [
                       Expanded(child: Container(height: 4,
-                          decoration: BoxDecoration(color: _primaryBlue, borderRadius: BorderRadius.circular(2)))),
+                          decoration: BoxDecoration(
+                              color: _primaryBlue, borderRadius: BorderRadius.circular(2)))),
                       const SizedBox(width: 6),
                       Expanded(child: Container(height: 4,
                           decoration: BoxDecoration(
-                              color: _step >= 1 ? _accentIndigo : _dividerColor,
-                              borderRadius: BorderRadius.circular(2)))),
-                      const SizedBox(width: 6),
-                      Expanded(child: Container(height: 4,
-                          decoration: BoxDecoration(
-                              color: _step >= 2 ? _successGreen : _dividerColor,
+                              color: _step >= 1 ? _successGreen : _dividerColor,
                               borderRadius: BorderRadius.circular(2)))),
                     ]),
                     const SizedBox(height: 24),
@@ -402,76 +293,8 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> with SingleTick
                             ),
                           ],
 
-                          // ── STEP 1: Code verification ────────────────────
+                          // ── STEP 1: New password ─────────────────────────
                           if (_step == 1) ...[
-                            Text('Verification Code',
-                                style: TextStyle(color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
-                            const SizedBox(height: 8),
-                            Row(children: [
-                              Expanded(
-                                flex: 2,
-                                child: TextField(
-                                  controller: codeController,
-                                  style: TextStyle(color: _textPrimary, fontSize: 14),
-                                  keyboardType: TextInputType.number,
-                                  maxLength: 6,
-                                  enabled: !_codeVerified,
-                                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                  decoration: _inputDecoration('6-digit code', Icons.verified_user_outlined,
-                                    suffixIcon: _codeVerified
-                                        ? Icon(Icons.check_circle_rounded, color: _successGreen, size: 20)
-                                        : null,
-                                  ).copyWith(counterText: ''),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              // Resend / countdown button
-                              if (_resendCountdown > 0)
-                                Container(
-                                  height: 52,
-                                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                                  decoration: BoxDecoration(
-                                      color: _dividerColor, borderRadius: BorderRadius.circular(14)),
-                                  child: Center(child: Text('${_resendCountdown}s',
-                                      style: TextStyle(color: _textSecondary,
-                                          fontWeight: FontWeight.w600, fontSize: 13))),
-                                )
-                              else
-                                GestureDetector(
-                                  onTap: _isSendingCode ? null : _sendVerificationCode,
-                                  child: Container(
-                                    height: 52,
-                                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                                    decoration: BoxDecoration(
-                                      color: _primaryBlue.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(14),
-                                      border: Border.all(color: _primaryBlue.withOpacity(0.3)),
-                                    ),
-                                    child: Center(
-                                      child: _isSendingCode
-                                          ? SizedBox(width: 18, height: 18,
-                                          child: CircularProgressIndicator(
-                                              strokeWidth: 2, color: _primaryBlue))
-                                          : Text('Resend',
-                                          style: TextStyle(color: _primaryBlue,
-                                              fontWeight: FontWeight.w600, fontSize: 13)),
-                                    ),
-                                  ),
-                                ),
-                            ]),
-                            const SizedBox(height: 16),
-                            // Verify code button
-                            _actionButton(
-                              label: 'Verify Code',
-                              isLoading: _isSendingCode,
-                              color: _accentIndigo,
-                              secondColor: _primaryBlue,
-                              onTap: _verifyCode,
-                            ),
-                          ],
-
-                          // ── STEP 2: New password ─────────────────────────
-                          if (_step == 2) ...[
                             Text('New Password',
                                 style: TextStyle(color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
                             const SizedBox(height: 8),
